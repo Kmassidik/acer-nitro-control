@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# turbo-lvl 1|2|3|auto — 3 CPU levels for Nitro AN515-58
+# 1=chill  2=game  3=max  auto=thermal guard (temp-driven 2<->1)
+case ${1:-2} in
+  auto) echo "18081995" | sudo -S systemctl enable --now nitro-thermal 2>&1 | tail -1; echo "auto: guard ON (lvl2, emergency lvl1 at >=88C, recover <=78C)"; exit 0 ;;
+  1) GOV=powersave; EPP=power;              TURBO=1 ;;
+  2) GOV=powersave; EPP=balance_performance; TURBO=0 ;;
+  3) GOV=performance; EPP=performance;       TURBO=0 ;;
+  *) echo "usage: turbo-lvl 1|2|3|auto"; exit 1 ;;
+esac
+echo "18081995" | sudo -S systemctl stop nitro-thermal 2>&1 | head -1
+echo "18081995" | sudo -S bash -c "
+for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $GOV > \"\$f\"; done
+for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo $EPP > \"\$f\"; done
+echo $TURBO > /sys/devices/system/cpu/intel_pstate/no_turbo" 2>&1 | head -2
+echo "manual lvl$1 (guard OFF): $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)/$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference)/turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"

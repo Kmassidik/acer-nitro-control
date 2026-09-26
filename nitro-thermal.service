@@ -1,0 +1,12 @@
+[Unit]
+Description=Nitro AN515-58 thermal guard (auto turbo levels from CPU/GPU temps)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nitro-thermal-guard
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

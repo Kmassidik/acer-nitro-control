@@ -28,8 +28,9 @@ One folder, everything visible. Live copies run from system paths; edit here, th
 - Controller: `fan% = 2.0 × (T − 55)`, silent <58, safety ramp 88→100
 - `EcPollInterval 2000ms`, `MaxSpeedValueRead 8500` (EC reports 7894–8000)
 
-## Autostart (all enabled)
+## Autostart (all enabled, ONE launch mechanism each)
 
 - `nbfc_service` — fan control (system, boot)
 - `nitro-thermal` — thermal guard (system, boot)
-- `nitro-tray` — tray widget (user graphical session + autostart .desktop)
+- `nitro-tray` — tray widget (systemd user service only — **not** XDG autostart; two mechanisms = 2 tray icons bug)
+- Tray has a `QLockFile` single-instance guard (`~/.nitro-tray.lock`) as extra insurance

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""nitro-tray — KDE tray widget: live CPU/GPU temp gauge + popup applet + level switching.
+"""nitro-tray — KDE tray widget: live gauge icon + Fedora-glass popup applet.
 
-Memory-conscious design:
-  - single 3s QTimer (idle cost ~0)
-  - 1s pulse QTimer runs ONLY while T >= 88 C
-  - popup created lazily on first click; its timer runs only while popup visible
-  - icon pixmap rebuilt once per poll only
+Style: Fedora Plasma glass (navy #0c1626 + gold #d9a862), Plus Jakarta Sans +
+JetBrains Mono. Memory-conscious: one 3s timer idle; pulse timer only while
+T >= 88 C; popup lazy, its timer runs only while visible.
 """
 import re
 import subprocess
@@ -13,14 +11,17 @@ import sys
 from pathlib import Path
 from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu, QMessageBox,
                                QWidget, QLabel, QProgressBar, QPushButton,
-                               QHBoxLayout, QVBoxLayout, QGridLayout)
+                               QHBoxLayout, QVBoxLayout, QGridLayout, QFrame)
 from PySide6.QtGui import (QPixmap, QPainter, QColor, QFont, QIcon, QAction,
                            QActionGroup, QPen)
-from PySide6.QtCore import QTimer, QRectF, Qt
+from PySide6.QtCore import QTimer, QRectF, Qt, Signal
 
 POLL_MS = 3000
 HOT_C = 88
 COOL_C = 85
+
+FONT = "Plus Jakarta Sans, Noto Sans"
+MONO = "JetBrains Mono, Monospace"
 
 def read_temps():
     cpu = 0
@@ -64,7 +65,6 @@ def read_level():
         return "?"
 
 def read_fans():
-    """On-demand only (popup visible): parse nbfc status -> [(name, temp, cur%, tgt%)]"""
     try:
         out = subprocess.run(["nbfc", "status"], capture_output=True,
                              text=True, timeout=3).stdout
@@ -83,18 +83,22 @@ def set_level(lvl):
         QMessageBox.warning(None, "nitro-tray", f"set level failed: {e}")
 
 def temp_color(t):
-    if t < 70:
-        return QColor("#2ecc71")
-    if t < HOT_C:
-        return QColor("#f39c12")
-    return QColor("#e74c3c")
+    if t < 60:
+        return QColor("#d9a862")
+    if t < 75:
+        return QColor("#e0b579")
+    if t < 85:
+        return QColor("#f97316")
+    return QColor("#ef4444")
 
-def bar_color(t):
-    if t < 70:
-        return "#2ecc71"
-    if t < HOT_C:
-        return "#f39c12"
-    return "#e74c3c"
+def bar_tier(t):
+    if t < 60:
+        return 0
+    if t < 75:
+        return 1
+    if t < 85:
+        return 2
+    return 3
 
 def make_icon(t, lvl="?", pulse=False):
     size = 64
@@ -103,9 +107,7 @@ def make_icon(t, lvl="?", pulse=False):
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    col = temp_color(t)
-    if pulse:
-        col = QColor("#ff5555")
+    col = QColor("#ef4444") if pulse else temp_color(t)
     rect = QRectF(7, 7, 50, 50)
     p.setPen(QPen(QColor("#444444"), 5.5, Qt.SolidLine, Qt.RoundCap))
     p.setBrush(Qt.NoBrush)
@@ -113,96 +115,223 @@ def make_icon(t, lvl="?", pulse=False):
     sweep = -max(0, min(100, t)) / 100 * 360 * 16
     p.setPen(QPen(col, 5.5, Qt.SolidLine, Qt.RoundCap))
     p.drawArc(rect, 90 * 16, int(sweep))
-    p.setPen(QColor("white"))
-    p.setFont(QFont("sans", 17, QFont.Bold))
+    p.setPen(QColor("#f2e8d5"))
+    p.setFont(QFont("JetBrains Mono", 16, QFont.Bold))
     p.drawText(QRectF(0, 0, size, size), int(Qt.AlignHCenter | Qt.AlignVCenter), str(t))
     badge = "!" if pulse else lvl
-    p.setBrush(QColor("#1b1b1b"))
+    p.setBrush(QColor("#141f33"))
     p.setPen(QPen(col, 1.2))
     p.drawRoundedRect(QRectF(22, 50, 20, 13), 5, 5)
     p.setPen(col)
-    p.setFont(QFont("sans", 8, QFont.Bold))
+    p.setFont(QFont("JetBrains Mono", 7, QFont.Bold))
     p.drawText(QRectF(22, 50, 20, 13), int(Qt.AlignHCenter | Qt.AlignVCenter), badge)
     p.end()
     return QIcon(pm)
 
 QSS = """
-QWidget { background: #1b1b2f; color: #eaeaea; font-size: 12px; }
-QLabel#title { font-size: 13px; font-weight: bold; color: #ffffff; }
-QLabel#row { color: #c8ccdb; }
-QLabel#meta { color: #9aa0b4; font-size: 11px; }
-QProgressBar { background: #2b2b40; border: none; border-radius: 7px; height: 16px;
-               text-align: center; font-size: 10px; color: #ffffff; }
-QProgressBar::chunk { border-radius: 7px; background: #2ecc71; }
-QPushButton#lvl { background: #2b2b40; border: 1px solid #3a3a55; border-radius: 9px;
-                  padding: 8px 0; font-weight: bold; color: #c8ccdb; }
-QPushButton#lvl:checked { background: #4f7cff; border-color: #4f7cff; color: #ffffff; }
-QPushButton#lvl:hover { background: #35354d; }
-QPushButton#x { background: transparent; border: none; color: #9aa0b4; font-size: 15px;
-                padding: 0 6px; }
-QPushButton#x:hover { color: #ffffff; }
-"""
+QWidget { background: transparent; color: #d8cbb4; font-family: "%(f)s"; font-size: 12px; }
+QFrame#panel {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #17243a, stop:1 #0c1626);
+  border: 1px solid rgba(216,203,180,0.18);
+  border-radius: 20px;
+}
+QLabel#title { color: #f2e8d5; font-size: 13px; font-weight: bold; background: transparent; }
+QLabel#dot { color: #d9a862; font-size: 12px; background: transparent; }
+QLabel#badge {
+  background: rgba(217,168,98,0.14); color: #d9a862;
+  border: 1px solid rgba(217,168,98,0.45); border-radius: 6px;
+  padding: 1px 7px; font-family: "%(m)s"; font-size: 10px; font-weight: bold;
+}
+QLabel#sect { color: #d8cbb4; font-size: 11px; font-weight: 600; background: transparent; }
+QLabel#fan { color: #5e6e87; font-size: 10px; font-family: "%(m)s"; background: transparent; }
+QLabel#temp { color: #f2e8d5; font-size: 13px; font-weight: bold;
+              font-family: "%(m)s"; background: transparent; }
+QProgressBar {
+  background: #0a1220; border: 1px solid rgba(94,110,135,0.5);
+  border-radius: 8px; height: 16px; text-align: right; padding-right: 7px;
+  color: #f2e8d5; font-family: "%(m)s"; font-size: 9px;
+}
+QProgressBar::chunk { border-radius: 7px; background: #d9a862; }
+QProgressBar[tier="1"]::chunk { background: #e0b579; }
+QProgressBar[tier="2"]::chunk { background: #f97316; }
+QProgressBar[tier="3"]::chunk { background: #ef4444; }
+QFrame#loadcard {
+  background: rgba(38,54,78,0.55); border: 1px solid rgba(94,110,135,0.35);
+  border-radius: 10px;
+}
+QLabel#load { color: #d8cbb4; font-family: "%(m)s"; font-size: 10px; background: transparent; }
+QLabel#chip {
+  background: rgba(217,168,98,0.12); color: #d9a862;
+  border: 1px solid rgba(217,168,98,0.35); border-radius: 6px;
+  padding: 1px 6px; font-family: "%(m)s"; font-size: 10px; font-weight: bold;
+}
+QFrame#lvlBtn {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(38,54,78,0.75), stop:1 rgba(23,36,58,0.75));
+  border: 1px solid rgba(94,110,135,0.5); border-radius: 12px;
+}
+QFrame#lvlBtn:hover {
+  border-color: rgba(217,168,98,0.65);
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(38,54,78,0.95), stop:1 rgba(23,36,58,0.9));
+}
+QFrame#lvlBtn[active="true"] {
+  background: qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #d9a862, stop:1 #b8863f);
+  border: 1px solid #f2e8d5;
+}
+QLabel#btnTitle { color: #d8cbb4; font-size: 11px; font-weight: bold;
+                  background: transparent; border: none; }
+QLabel#btnSub { color: #5e6e87; font-size: 9px; font-family: "%(m)s";
+                background: transparent; border: none; }
+QFrame#lvlBtn[active="true"] QLabel#btnTitle { color: #0c1626; }
+QFrame#lvlBtn[active="true"] QLabel#btnSub { color: #4a3c22; }
+QLabel#foot { color: #5e6e87; font-size: 10px; font-family: "%(m)s"; background: transparent; }
+QLabel#footG { color: #d9a862; font-size: 10px; font-family: "%(m)s"; background: transparent; }
+QLabel#sep { color: #5e6e87; background: transparent; }
+QPushButton#x { color: #5e6e87; border: none; background: transparent; font-size: 15px; padding: 0 4px; }
+QPushButton#x:hover { color: #f2e8d5; }
+""" % {"f": FONT, "m": MONO}
+
+class LevelButton(QFrame):
+    clicked = Signal(str)
+    def __init__(self, key, title, sub, parent=None):
+        super().__init__(parent)
+        self.key = key
+        self._active = False
+        self.setObjectName("lvlBtn")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setProperty("active", False)
+        self.setFixedHeight(52)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(6, 8, 6, 7)
+        lay.setSpacing(1)
+        self.t = QLabel(title, self); self.t.setObjectName("btnTitle")
+        self.s = QLabel(sub, self); self.s.setObjectName("btnSub")
+        self.t.setAlignment(Qt.AlignCenter)
+        self.s.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.t)
+        lay.addWidget(self.s)
+
+    def set_active(self, on):
+        if on != self._active:
+            self._active = on
+            self.setProperty("active", on)
+            self.style().unpolish(self)
+            self.style().polish(self)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit(self.key)
+        super().mousePressEvent(e)
 
 class Popup(QWidget):
-    """Mini status applet: bars + fan line + level buttons. Lives only while visible."""
+    """Fedora-glass mini applet: gauges, load line, 6 level buttons. Visible-only cost."""
     def __init__(self, tray):
         super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.tray = tray
-        self.setAttribute(Qt.WA_ShowWithoutActivating, False)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setStyleSheet(QSS)
-        self.setFixedWidth(270)
+        self.setFixedWidth(300)
+
+        panel = QFrame(self)
+        panel.setObjectName("panel")
 
         hdr = QHBoxLayout()
-        self.title = QLabel("Nitro AN515-58")
-        self.title.setObjectName("title")
-        self.lvl_badge = QLabel("A")
-        self.lvl_badge.setObjectName("meta")
-        x = QPushButton("×")
-        x.setObjectName("x")
+        dot = QLabel("●"); dot.setObjectName("dot")
+        title = QLabel("Nitro AN515-58"); title.setObjectName("title")
+        self.badge = QLabel("…"); self.badge.setObjectName("badge")
+        x = QPushButton("×"); x.setObjectName("x")
         x.clicked.connect(self.hide)
-        hdr.addWidget(self.title)
-        hdr.addWidget(self.lvl_badge)
+        hdr.addWidget(dot)
+        hdr.addWidget(title)
+        hdr.addWidget(self.badge)
         hdr.addStretch()
         hdr.addWidget(x)
 
-        self.cpu_bar = QProgressBar(); self.cpu_bar.setRange(0, 100)
-        self.gpu_bar = QProgressBar(); self.gpu_bar.setRange(0, 100)
-        self.cpu_lbl = QLabel("CPU"); self.cpu_lbl.setObjectName("row")
-        self.gpu_lbl = QLabel("GPU"); self.gpu_lbl.setObjectName("row")
-        self.fan_lbl = QLabel("fans …"); self.fan_lbl.setObjectName("meta")
+        self.cpu_fan = QLabel("—"); self.cpu_fan.setObjectName("fan")
+        self.gpu_fan = QLabel("—"); self.gpu_fan.setObjectName("fan")
+        self.cpu_temp = QLabel("--°C"); self.cpu_temp.setObjectName("temp")
+        self.gpu_temp = QLabel("--°C"); self.gpu_temp.setObjectName("temp")
+        self.cpu_bar = self._bar()
+        self.gpu_bar = self._bar()
 
-        bars = QVBoxLayout()
-        for lbl, bar in ((self.cpu_lbl, self.cpu_bar), (self.gpu_lbl, self.gpu_bar)):
-            r = QHBoxLayout(); r.addWidget(lbl, 0); r.addWidget(bar, 1)
-            bars.addLayout(r)
-        bars.addWidget(self.fan_lbl)
+        loadcard = QFrame(); loadcard.setObjectName("loadcard")
+        ll = QHBoxLayout(loadcard)
+        ll.setContentsMargins(10, 6, 8, 6)
+        self.load_lbl = QLabel("Load: …"); self.load_lbl.setObjectName("load")
+        self.chip = QLabel("≥88°"); self.chip.setObjectName("chip")
+        ll.addWidget(self.load_lbl)
+        ll.addStretch()
+        ll.addWidget(self.chip)
 
+        grid = QGridLayout(); grid.setSpacing(7)
         self.btns = {}
-        grid = QGridLayout(); grid.setSpacing(6)
-        for i, (k, lab) in enumerate([("1", "1 chill"), ("2", "2 cool"),
-                                      ("3", "3 game"), ("4", "4 fast"),
-                                      ("5", "5 max"), ("A", "Auto")]):
-            b = QPushButton(lab)
-            b.setObjectName("lvl")
-            b.setCheckable(True)
-            b.clicked.connect(lambda _=False, kk=k: self._pick(kk))
+        specs = [("1", "1 chill", "Quiet"), ("2", "2 cool", "Cool"),
+                 ("3", "3 game", "Balanced"), ("4", "4 fast", "Boost"),
+                 ("5", "5 max", "Full RPM"), ("A", "Auto", "Dynamic")]
+        for i, (k, t_, s_) in enumerate(specs):
+            b = LevelButton(k, t_, s_)
+            b.clicked.connect(self._pick)
             self.btns[k] = b
             grid.addWidget(b, i // 3, i % 3)
 
-        foot = QLabel("hot alert ≥88° · guard: nitro-thermal")
-        foot.setObjectName("meta")
+        foot = QHBoxLayout()
+        f1 = QLabel("hot alert"); f1.setObjectName("foot")
+        f2 = QLabel("≥88°"); f2.setObjectName("foot")
+        f3 = QLabel("· guard:"); f3.setObjectName("foot")
+        f4 = QLabel("nitro-thermal"); f4.setObjectName("footG")
+        foot.addWidget(f1); foot.addWidget(f2); foot.addWidget(f3); foot.addWidget(f4)
+        foot.addStretch()
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
-        lay.setSpacing(10)
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(11)
         lay.addLayout(hdr)
-        lay.addLayout(bars)
+        lay.addWidget(self._hline())
+        lay.addWidget(self._temp_row("CPU", self.cpu_fan, self.cpu_temp, self.cpu_bar))
+        lay.addWidget(self._temp_row("GPU", self.gpu_fan, self.gpu_temp, self.gpu_bar))
+        lay.addWidget(loadcard)
         lay.addLayout(grid)
-        lay.addWidget(foot)
+        lay.addLayout(foot)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(panel)
 
         self.timer = QTimer(self)
         self.timer.setInterval(POLL_MS)
         self.timer.timeout.connect(self.refresh)
+
+    def _bar(self):
+        b = QProgressBar()
+        b.setRange(0, 100)
+        b.setValue(0)
+        b.setFormat("")
+        b.setProperty("tier", 0)
+        return b
+
+    def _hline(self):
+        ln = QFrame()
+        ln.setFrameShape(QFrame.HLine)
+        ln.setFixedHeight(1)
+        ln.setStyleSheet("background: rgba(94,110,135,0.35); border: none;")
+        return ln
+
+    def _temp_row(self, name, fan, temp, bar):
+        r = QHBoxLayout()
+        r.setSpacing(8)
+        lbl = QLabel(name); lbl.setObjectName("sect")
+        r.addWidget(lbl)
+        r.addWidget(fan)
+        r.addStretch()
+        r.addWidget(temp)
+        r2 = QHBoxLayout()
+        r2.addWidget(bar, 1)
+        w = QWidget()
+        wl = QVBoxLayout(w)
+        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setSpacing(4)
+        wl.addLayout(r)
+        wl.addLayout(r2)
+        return w
 
     def _pick(self, k):
         set_level("auto" if k == "A" else k)
@@ -232,22 +361,29 @@ class Popup(QWidget):
     def refresh(self):
         cpu, gpu = read_temps()
         lvl = read_level()
+        fans = read_fans()
         for bar, val in ((self.cpu_bar, cpu), (self.gpu_bar, gpu)):
             bar.setValue(val)
-            bar.setFormat(f"{val}°C")
-            bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(val)}; }}")
-        self.cpu_lbl.setText("CPU")
-        self.gpu_lbl.setText("GPU")
-        self.lvl_badge.setText({"A": "auto", "1": "lvl1", "2": "lvl2", "3": "lvl3",
-                                "4": "lvl4", "5": "lvl5"}.get(lvl, lvl))
-        for k, b in self.btns.items():
-            b.setChecked(k == lvl)
-        fans = read_fans()
-        if fans:
-            self.fan_lbl.setText("   ·   ".join(
-                f"{n.split()[0]} {cur:.0f}%→{tgt:.0f}%" for n, _, cur, tgt in fans))
+            tier = bar_tier(val)
+            if bar.property("tier") != tier:
+                bar.setProperty("tier", tier)
+                bar.style().unpolish(bar)
+                bar.style().polish(bar)
+        self.cpu_temp.setText(f"{cpu}°C")
+        self.gpu_temp.setText(f"{gpu}°C")
+        self.badge.setText({"A": "auto", "1": "lvl1", "2": "lvl2", "3": "lvl3",
+                            "4": "lvl4", "5": "lvl5"}.get(lvl, lvl))
+        if len(fans) >= 2:
+            self.cpu_fan.setText(f"({fans[0][2]:.0f}%→{fans[0][3]:.0f}%)")
+            self.gpu_fan.setText(f"({fans[1][2]:.0f}%→{fans[1][3]:.0f}%)")
+            self.load_lbl.setText(f"CPU {fans[0][2]:.0f}%→{fans[0][3]:.0f}%"
+                                  f" · GPU {fans[1][2]:.0f}%→{fans[1][3]:.0f}%")
         else:
-            self.fan_lbl.setText("fans: n/a")
+            self.cpu_fan.setText("(n/a)")
+            self.gpu_fan.setText("(n/a)")
+            self.load_lbl.setText("Load: n/a")
+        for k, b in self.btns.items():
+            b.set_active(k == lvl)
 
     def hideEvent(self, e):
         self.timer.stop()
@@ -263,7 +399,7 @@ class Tray(QSystemTrayIcon):
         super().__init__()
         self.hot = False
         self.pulse_on = False
-        self.popup = None  # lazy
+        self.popup = None
 
         self.menu = QMenu()
         self.info = QAction("…")
@@ -274,8 +410,8 @@ class Tray(QSystemTrayIcon):
         self.group.setExclusive(True)
         self.level_actions = {}
         for lvl, label in [("1", "lvl1  chill (silent)"), ("2", "lvl2  cool (quiet)"),
-                           ("3", "lvl3  game (balanced)"), ("4", "lvl4  fast (responsive)"),
-                           ("5", "lvl5  max (pinned)"), ("A", "auto  (thermal guard)")]:
+                           ("3", "lvl3  game (balanced)"), ("4", "lvl4  fast (boost)"),
+                           ("5", "lvl5  max (full rpm)"), ("A", "auto  (thermal guard)")]:
             a = QAction(label, self.menu)
             a.setCheckable(True)
             a.triggered.connect(lambda _=False, l=lvl: (set_level("auto" if l == "A" else l),
@@ -306,7 +442,6 @@ class Tray(QSystemTrayIcon):
     def _on_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
             self._open_popup()
-        # Context handled by setContextMenu (right-click menu)
 
     def _open_popup(self):
         if self.popup is None:

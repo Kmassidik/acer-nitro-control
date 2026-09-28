@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""nitro-tray — KDE tray widget: live CPU/GPU temp gauge + turbo level switching.
+"""nitro-tray — KDE tray widget: live CPU/GPU temp gauge + popup applet + level switching.
 
 Memory-conscious design:
   - single 3s QTimer (idle cost ~0)
-  - 1s pulse QTimer exists but runs ONLY while T >= 88 C
+  - 1s pulse QTimer runs ONLY while T >= 88 C
+  - popup created lazily on first click; its timer runs only while popup visible
   - icon pixmap rebuilt once per poll only
 """
+import re
 import subprocess
 import sys
 from pathlib import Path
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
+from PySide6.QtWidgets import (QApplication, QSystemTrayIcon, QMenu, QMessageBox,
+                               QWidget, QLabel, QProgressBar, QPushButton,
+                               QHBoxLayout, QVBoxLayout, QGridLayout)
 from PySide6.QtGui import (QPixmap, QPainter, QColor, QFont, QIcon, QAction,
-                           QActionGroup, QPen, QBrush)
+                           QActionGroup, QPen)
 from PySide6.QtCore import QTimer, QRectF, Qt
 
 POLL_MS = 3000
-HOT_C = 88          # thermal guard threshold
-COOL_C = 85         # hysteresis before pulse stops
+HOT_C = 88
+COOL_C = 85
 
 def read_temps():
     cpu = 0
@@ -56,6 +60,18 @@ def read_level():
     except Exception:
         return "?"
 
+def read_fans():
+    """On-demand only (popup visible): parse nbfc status -> [(name, temp, cur%, tgt%)]"""
+    try:
+        out = subprocess.run(["nbfc", "status"], capture_output=True,
+                             text=True, timeout=3).stdout
+        fans = re.findall(r"Fan Display Name\s*:\s*([^\n]+)\s+Temperature\s*:\s*([\d.]+)"
+                          r".*?Current Fan Speed\s*:\s*([\d.]+)\s+Target Fan Speed\s*:\s*([\d.]+)",
+                          out, re.S)
+        return [(n.strip(), float(t), float(c), float(g)) for n, t, c, g in fans]
+    except Exception:
+        return []
+
 def set_level(lvl):
     try:
         subprocess.run(["/home/kurnia/.local/bin/turbo-lvl", lvl],
@@ -65,37 +81,38 @@ def set_level(lvl):
 
 def temp_color(t):
     if t < 70:
-        return QColor("#2ecc71")   # cool
+        return QColor("#2ecc71")
     if t < HOT_C:
-        return QColor("#f39c12")   # warm
-    return QColor("#e74c3c")       # hot
+        return QColor("#f39c12")
+    return QColor("#e74c3c")
+
+def bar_color(t):
+    if t < 70:
+        return "#2ecc71"
+    if t < HOT_C:
+        return "#f39c12"
+    return "#e74c3c"
 
 def make_icon(t, lvl="?", pulse=False):
-    """Gauge-ring icon: arc = temp/100, center = temp, corner badge = level."""
     size = 64
-    pm = QPixmap(size * 2, size * 2)          # 2x for HiDPI, logical size 64
+    pm = QPixmap(size * 2, size * 2)
     pm.setDevicePixelRatio(2.0)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     col = temp_color(t)
     if pulse:
-        col = QColor("#ff5555")                # alert red while guard active
+        col = QColor("#ff5555")
     rect = QRectF(7, 7, 50, 50)
-    # background ring
     p.setPen(QPen(QColor("#444444"), 5.5, Qt.SolidLine, Qt.RoundCap))
     p.setBrush(Qt.NoBrush)
     p.drawArc(rect, 0, 360 * 16)
-    # temp arc: starts at 12 o'clock, clockwise
     sweep = -max(0, min(100, t)) / 100 * 360 * 16
     p.setPen(QPen(col, 5.5, Qt.SolidLine, Qt.RoundCap))
     p.drawArc(rect, 90 * 16, int(sweep))
-    # center number
     p.setPen(QColor("white"))
-    f = QFont("sans", 17, QFont.Bold)
-    p.setFont(f)
+    p.setFont(QFont("sans", 17, QFont.Bold))
     p.drawText(QRectF(0, 0, size, size), int(Qt.AlignHCenter | Qt.AlignVCenter), str(t))
-    # level badge (bottom)
     badge = "!" if pulse else lvl
     p.setBrush(QColor("#1b1b1b"))
     p.setPen(QPen(col, 1.2))
@@ -106,18 +123,148 @@ def make_icon(t, lvl="?", pulse=False):
     p.end()
     return QIcon(pm)
 
+QSS = """
+QWidget { background: #1b1b2f; color: #eaeaea; font-size: 12px; }
+QLabel#title { font-size: 13px; font-weight: bold; color: #ffffff; }
+QLabel#row { color: #c8ccdb; }
+QLabel#meta { color: #9aa0b4; font-size: 11px; }
+QProgressBar { background: #2b2b40; border: none; border-radius: 7px; height: 16px;
+               text-align: center; font-size: 10px; color: #ffffff; }
+QProgressBar::chunk { border-radius: 7px; background: #2ecc71; }
+QPushButton#lvl { background: #2b2b40; border: 1px solid #3a3a55; border-radius: 9px;
+                  padding: 8px 0; font-weight: bold; color: #c8ccdb; }
+QPushButton#lvl:checked { background: #4f7cff; border-color: #4f7cff; color: #ffffff; }
+QPushButton#lvl:hover { background: #35354d; }
+QPushButton#x { background: transparent; border: none; color: #9aa0b4; font-size: 15px;
+                padding: 0 6px; }
+QPushButton#x:hover { color: #ffffff; }
+"""
+
+class Popup(QWidget):
+    """Mini status applet: bars + fan line + level buttons. Lives only while visible."""
+    def __init__(self, tray):
+        super().__init__(None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.tray = tray
+        self.setAttribute(Qt.WA_ShowWithoutActivating, False)
+        self.setStyleSheet(QSS)
+        self.setFixedWidth(270)
+
+        hdr = QHBoxLayout()
+        self.title = QLabel("Nitro AN515-58")
+        self.title.setObjectName("title")
+        self.lvl_badge = QLabel("A")
+        self.lvl_badge.setObjectName("meta")
+        x = QPushButton("×")
+        x.setObjectName("x")
+        x.clicked.connect(self.hide)
+        hdr.addWidget(self.title)
+        hdr.addWidget(self.lvl_badge)
+        hdr.addStretch()
+        hdr.addWidget(x)
+
+        self.cpu_bar = QProgressBar(); self.cpu_bar.setRange(0, 100)
+        self.gpu_bar = QProgressBar(); self.gpu_bar.setRange(0, 100)
+        self.cpu_lbl = QLabel("CPU"); self.cpu_lbl.setObjectName("row")
+        self.gpu_lbl = QLabel("GPU"); self.gpu_lbl.setObjectName("row")
+        self.fan_lbl = QLabel("fans …"); self.fan_lbl.setObjectName("meta")
+
+        bars = QVBoxLayout()
+        for lbl, bar in ((self.cpu_lbl, self.cpu_bar), (self.gpu_lbl, self.gpu_bar)):
+            r = QHBoxLayout(); r.addWidget(lbl, 0); r.addWidget(bar, 1)
+            bars.addLayout(r)
+        bars.addWidget(self.fan_lbl)
+
+        self.btns = {}
+        grid = QGridLayout(); grid.setSpacing(6)
+        for i, (k, lab) in enumerate([("1", "1 chill"), ("2", "2 game"),
+                                      ("3", "3 max"), ("A", "Auto")]):
+            b = QPushButton(lab)
+            b.setObjectName("lvl")
+            b.setCheckable(True)
+            b.clicked.connect(lambda _=False, kk=k: self._pick(kk))
+            self.btns[k] = b
+            grid.addWidget(b, 0, i)
+
+        foot = QLabel("hot alert ≥88° · guard: nitro-thermal")
+        foot.setObjectName("meta")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(10)
+        lay.addLayout(hdr)
+        lay.addLayout(bars)
+        lay.addLayout(grid)
+        lay.addWidget(foot)
+
+        self.timer = QTimer(self)
+        self.timer.setInterval(POLL_MS)
+        self.timer.timeout.connect(self.refresh)
+
+    def _pick(self, k):
+        set_level("auto" if k == "A" else k)
+        self.refresh()
+
+    def toggle(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.refresh()
+            self._place()
+            self.show()
+            self.timer.start()
+
+    def _place(self):
+        geo = self.tray.geometry()
+        screen = QApplication.screenAt(geo.center()) or QApplication.primaryScreen()
+        sg = screen.availableGeometry()
+        self.adjustSize()
+        x = geo.center().x() - self.width() // 2
+        x = max(sg.x() + 4, min(x, sg.x() + sg.width() - self.width() - 4))
+        y = geo.y() - self.height() - 8
+        if y < sg.y() + 4:
+            y = geo.bottom() + 8
+        self.move(x, y)
+
+    def refresh(self):
+        cpu, gpu = read_temps()
+        lvl = read_level()
+        for bar, val in ((self.cpu_bar, cpu), (self.gpu_bar, gpu)):
+            bar.setValue(val)
+            bar.setFormat(f"{val}°C")
+            bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(val)}; }}")
+        self.cpu_lbl.setText("CPU")
+        self.gpu_lbl.setText("GPU")
+        self.lvl_badge.setText({"A": "auto", "1": "lvl1", "2": "lvl2", "3": "lvl3"}.get(lvl, lvl))
+        for k, b in self.btns.items():
+            b.setChecked(k == lvl)
+        fans = read_fans()
+        if fans:
+            self.fan_lbl.setText("   ·   ".join(
+                f"{n.split()[0]} {cur:.0f}%→{tgt:.0f}%" for n, _, cur, tgt in fans))
+        else:
+            self.fan_lbl.setText("fans: n/a")
+
+    def hideEvent(self, e):
+        self.timer.stop()
+        super().hideEvent(e)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+        super().keyPressEvent(e)
+
 class Tray(QSystemTrayIcon):
     def __init__(self):
         super().__init__()
         self.hot = False
         self.pulse_on = False
+        self.popup = None  # lazy
 
         self.menu = QMenu()
         self.info = QAction("…")
         self.info.setEnabled(False)
         self.menu.addAction(self.info)
         self.menu.addSeparator()
-
         self.group = QActionGroup(self.menu)
         self.group.setExclusive(True)
         self.level_actions = {}
@@ -131,22 +278,34 @@ class Tray(QSystemTrayIcon):
             self.menu.addAction(a)
             self.level_actions[lvl] = a
         self.menu.addSeparator()
+        openp = QAction("Open panel", self.menu)
+        openp.triggered.connect(self._open_popup)
+        self.menu.addAction(openp)
         q = QAction("Quit", self.menu)
         q.triggered.connect(QApplication.quit)
         self.menu.addAction(q)
         self.menu.aboutToShow.connect(self._sync_menu)
         self.setContextMenu(self.menu)
-        self.activated.connect(lambda r: self.menu.exec() if r == QSystemTrayIcon.Trigger else None)
+        self.activated.connect(self._on_activated)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll)
         self.timer.start(POLL_MS)
-        # pulse timer: allocated now, started ONLY while hot (idle cost ~0)
         self.pulse = QTimer()
         self.pulse.setInterval(500)
         self.pulse.timeout.connect(self._pulse_tick)
         self.poll()
         self.show()
+
+    def _on_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self._open_popup()
+        # Context handled by setContextMenu (right-click menu)
+
+    def _open_popup(self):
+        if self.popup is None:
+            self.popup = Popup(self)
+        self.popup.toggle()
 
     def _sync_menu(self):
         lvl = read_level()
@@ -165,7 +324,6 @@ class Tray(QSystemTrayIcon):
         self.setIcon(make_icon(t, lvl))
         self.info.setText(f"CPU {cpu}°   GPU {gpu}°   level {lvl}")
         self.setToolTip(f"Nitro thermal — CPU {cpu}°C GPU {gpu}°C (level {lvl})")
-        # hot alert: start/stop pulse with hysteresis
         if t >= HOT_C and not self.hot:
             self.hot = True
             self.pulse.start()

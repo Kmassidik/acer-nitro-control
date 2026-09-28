@@ -1,100 +1,101 @@
-# nitro-control
+# nitro-control (C++ / Qt6)
 
-Fan, thermal & turbo control for the **Acer Nitro AN515-58** on Linux — with a
-Fedora-glass **KDE Plasma system-tray widget**.
+Native **C++/Qt6** fan, turbo & RGB control for the **Acer Nitro AN515-58** —
+Fedora-glass KDE system-tray widget, 5 turbo levels + auto thermal guard and
+keyboard RGB panel, in a single ~200 KB binary.
 
-![screenshot](docs/screenshot.png)
+![popup](docs/screenshot.png)
 ![rgb panel](docs/screenshot-rgb.png)
+
+## Why C++?
+
+This repo started as a Python/PySide6 app (in git history) and was rewritten
+in C++/Qt6 with identical features and look:
+
+| | PySide6 | C++/Qt6 (this) |
+|---|---|---|
+| RSS | ~88 MB | ~61 MB (mostly shared Qt libs) |
+| PSS (unique) | ~40 MB | **~17 MB** |
+| Startup | ~1 s | instant |
 
 ## Features
 
-- **5 turbo levels + auto** — `chill / cool / game / fast / max` (governor + EPP + turbo)
-  and `auto` = thermal guard (≥88°C emergency drop, recovers ≤78°C)
+- **5 turbo levels + auto** — `chill / cool / game / fast / max`
+  (governor + EPP + turbo) and `auto` = thermal guard
+  (≥88 °C emergency drop to lvl1, recovers ≤78 °C)
 - **System-tray gauge icon** — live temperature ring (HiDPI), color tiers,
-  level badge, red pulse while the guard is tripped
+  level badge, red pulse while hot
 - **Glass popup applet** (left-click) — CPU/GPU temp bars, live fan duties,
-  6 level buttons; plain menu on right-click
-- **Keyboard RGB panel** (popup button / right-click menu) — 4 zone colors,
-  6 effects, speed + brightness, glass UI
-- **RGB survives reboot & suspend** — state saved to
+  6 level buttons + `1-5` / `A` / `Esc` keys; plain menu on right-click
+- **Keyboard RGB panel** — 4 zone colors, 6 effects, speed + brightness
+- **RGB survives reboot & suspend** — saved to
   `~/.config/nitro-control/rgb.json`, re-applied at login
   (`nitro-rgb-restore.service`) and on resume (`system-sleep` hook)
 - **Smooth fan curve** — nbfc custom curve, 7 °C hysteresis, silent at idle
-- **Autostart via systemd** — one launch mechanism, single-instance lock,
-  lazy windows (popup/RGB created once — no idle cost, no leaks)
+- **Single instance** — `~/.nitro-tray.lock`, lazy popup/RGB windows,
+  timers only while visible/hot
 
-## Layout
+## Build
 
-```
-bin/                  turbo-lvl, nitro-thermal-guard, nitro-tray,
-                      nitro-rgb-restore launchers
-nitro_tray/           Python package (PySide6)
-  config.py           tunables: thresholds, level definitions, paths
-  sensors.py          coretemp / nvidia-smi / nbfc readers
-  control.py          read & apply performance level
-  rgb.py              facer device protocol + state persistence (CLI)
-  theme.py            Fedora-glass palette + Qt stylesheet
-  icon.py             tray gauge icon
-  widgets.py          LevelButton
-  popup.py            glass popup applet (fan control)
-  rgb_panel.py        glass RGB panel
-  tray.py             tray icon, menu, popup/RGB launcher, hot pulse
-  app.py              entrypoint (lockfile, QApplication)
-systemd/              nitro-thermal, nitro-tray, nitro-rgb-restore services
-                      + system-sleep/nitro-rgb resume hook
-nbfc/                 fan-curve config for nbfc
-docs/screenshot.png
-install.sh
+Fedora deps:
+
+```sh
+sudo dnf install qt6-qtbase-devel gcc-c++ cmake make
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
 ## Install
 
-```bash
-sudo dnf install nbfc python3-pyside6   # prerequisites (Fedora)
+```sh
 ./install.sh
 ```
 
-Requires: `nbfc` (fan control), `python3-pyside6`, fonts
-*Plus Jakarta Sans* + *JetBrains Mono* for the exact widget look.
+Builds, installs to `~/.local/bin/nitro-control`, sets up the nbfc fan curve,
+the thermal-guard service and the tray/RGB user services (system parts need
+`sudo`). Verify with `systemctl --user status nitro-tray`.
 
-## Usage
+### CLI
 
-```bash
-turbo-lvl 1        # chill  (powersave / power / turbo off)
-turbo-lvl 2        # cool
-turbo-lvl 3        # game   (balanced, turbo on)
-turbo-lvl 4        # fast
-turbo-lvl 5        # max    (performance / performance / turbo on)
-turbo-lvl auto     # thermal guard on
+```
+nitro-control                     run tray (single instance)
+nitro-control --restore-rgb       re-apply saved RGB state (headless)
+nitro-control --restore-rgb --state FILE
+nitro-control --screenshot popup|rgb|icon FILE   offscreen UI snapshot
 ```
 
-- **Left-click** tray icon → glass popup (levels, temps, fans, **Keyboard RGB**)
-- **Right-click** → menu (levels, open panel, RGB panel, quit)
-- Inside the popup: keys **1–5** switch levels, **A** = auto, **Esc** closes
-- RGB state applies instantly in the panel; it is remembered across
-  reboot/suspend automatically
+## Layout
 
-Fan curve lives in `nbfc/Acer-Nitro-AN515-58.json`
-(sensor: CPU fan ← `coretemp`, GPU fan ← `acpitz`, poll 2000 ms).
-
-## Uninstall
-
-```bash
-sudo systemctl disable --now nitro-thermal
-systemctl --user disable --now nitro-tray
-sudo rm /usr/local/bin/nitro-thermal-guard ~/.local/bin/turbo-lvl \
-        ~/.local/bin/nitro-tray /etc/systemd/system/nitro-thermal.service \
-        ~/.config/systemd/user/nitro-tray.service
-rm -rf ~/.local/share/nitro-control
+```
+src/
+  config.h          tunables: thresholds, level table, paths
+  sensors.*         coretemp / nvidia-smi / nbfc readers
+  control.*         read & apply performance level, RGB protocol + state
+  theme.*           Fedora-glass palette + Qt stylesheet
+  icon.*            tray gauge icon (QPainter)
+  levelbutton.*     glass level/mode button
+  popup.*           glass popup applet (fan control)
+  rgbpanel.*        glass RGB panel
+  tray.*            system-tray icon, menu, hot pulse
+  main.cpp          CLI: tray / --restore-rgb / --screenshot
+bin/                turbo-lvl + nitro-thermal-guard helpers
+systemd/            user units + system-sleep RGB hook
+nbfc/               fan curve config
+docs/               screenshots
 ```
 
 ## Customizing
 
-Want different colors, button sizes, fonts or thresholds? See the human
-guide: **[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md)** — it maps every
-"where do I change X" to a file, with copy-paste examples.
+- **Palette / QSS** — `src/theme.cpp`, fonts in `src/config.h`
+- **Level table** — `src/config.h` `LEVELS` (keep `bin/turbo-lvl` in sync!)
+- **Temps / timing** — `src/config.h` (`HOT_C`, `COOL_C`, `POLL_MS`, `PULSE_MS`)
+- **UI verification** —
+  `QT_QPA_PLATFORM=offscreen ./build/nitro-control --screenshot popup /tmp/p.png`
 
-## Thanks
+## Related
 
-Built on [nbfc-linux](https://github.com/nbclyke/nbfc-linux) (fan EC access)
-and PySide6. MIT — see [LICENSE](LICENSE).
+- Machine: Acer Nitro AN515-58, Fedora 44, KDE Plasma (Wayland)
+
+## License
+
+MIT — Kurnia Massidik

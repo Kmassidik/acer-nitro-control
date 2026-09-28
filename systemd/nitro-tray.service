@@ -1,5 +1,5 @@
 [Unit]
-Description=Nitro thermal tray widget
+Description=Nitro thermal tray widget (C++)
 After=graphical-session.target
 PartOf=graphical-session.target
 
@@ -7,7 +7,7 @@ PartOf=graphical-session.target
 Type=simple
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
-ExecStart=%h/.local/bin/nitro-tray
+ExecStart=%h/.local/bin/nitro-control
 Restart=on-failure
 RestartSec=5
 

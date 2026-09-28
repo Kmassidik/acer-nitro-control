@@ -1,36 +1,94 @@
-# nitro-control — AN515-58 fan + thermal + turbo levels
+# nitro-control
 
-One folder, everything visible. Live copies run from system paths; edit here, then `bash install.sh` to deploy.
+Fan, thermal & turbo control for the **Acer Nitro AN515-58** on Linux — with a
+Fedora-glass **KDE Plasma system-tray widget**.
 
-## Files
+![screenshot](docs/screenshot.png)
+![rgb panel](docs/screenshot-rgb.png)
 
-| File | What | Lives at (running copy) |
-|------|------|--------------------------|
-| `turbo-lvl` | `turbo-lvl 1\|2\|3\|auto` — 3 CPU levels | `~/.local/bin/turbo-lvl` |
-| `nitro-thermal-guard` | daemon: polls CPU+GPU temp every 5s, `>=88C→lvl1`, `<=78C→lvl2` | `/usr/local/bin/nitro-thermal-guard` |
-| `nitro-thermal.service` | system unit for the guard | `/etc/systemd/system/nitro-thermal.service` |
-| `nitro-tray.py` | KDE tray widget: T° icon + click menu | `~/.local/bin/nitro-tray.py` |
-| `nitro-tray.service` | user unit for the tray | `~/.config/systemd/user/nitro-tray.service` |
-| `Acer-Nitro-AN515-58.json` | nbfc fan curve (linear controller) | `/usr/local/share/nbfc/configs/Acer Nitro AN515-58.json` |
-| `install.sh` | deploys everything + enables autostart | — |
+## Features
 
-## The 3 levels
+- **5 turbo levels + auto** — `chill / cool / game / fast / max` (governor + EPP + turbo)
+  and `auto` = thermal guard (≥88°C emergency drop, recovers ≤78°C)
+- **System-tray gauge icon** — live temperature ring (HiDPI), color tiers,
+  level badge, red pulse while the guard is tripped
+- **Glass popup applet** (left-click) — CPU/GPU temp bars, live fan duties,
+  6 level buttons; plain menu on right-click
+- **Keyboard RGB panel** (popup button / right-click menu) — 4 zone colors,
+  6 effects, speed + brightness, glass UI
+- **RGB survives reboot & suspend** — state saved to
+  `~/.config/nitro-control/rgb.json`, re-applied at login
+  (`nitro-rgb-restore.service`) and on resume (`system-sleep` hook)
+- **Smooth fan curve** — nbfc custom curve, 7 °C hysteresis, silent at idle
+- **Autostart via systemd** — one launch mechanism, single-instance lock,
+  lazy windows (popup/RGB created once — no idle cost, no leaks)
 
-- **lvl1 chill**: `powersave/power`, turbo OFF — silent browsing
-- **lvl2 game**: `powersave/balance_performance`, turbo ON — Dota
-- **lvl3 max**: `performance/performance`, turbo ON — pinned, loud
-- **auto**: thermal guard drives 2↔1 from silicon temps
+## Layout
 
-## The math (measured on this machine)
+```
+bin/                  turbo-lvl, nitro-thermal-guard, nitro-tray,
+                      nitro-rgb-restore launchers
+nitro_tray/           Python package (PySide6)
+  config.py           tunables: thresholds, level definitions, paths
+  sensors.py          coretemp / nvidia-smi / nbfc readers
+  control.py          read & apply performance level
+  rgb.py              facer device protocol + state persistence (CLI)
+  theme.py            Fedora-glass palette + Qt stylesheet
+  icon.py             tray gauge icon
+  widgets.py          LevelButton
+  popup.py            glass popup applet (fan control)
+  rgb_panel.py        glass RGB panel
+  tray.py             tray icon, menu, popup/RGB launcher, hot pulse
+  app.py              entrypoint (lockfile, QApplication)
+systemd/              nitro-thermal, nitro-tray, nitro-rgb-restore services
+                      + system-sleep/nitro-rgb resume hook
+nbfc/                 fan-curve config for nbfc
+docs/screenshot.png
+install.sh
+```
 
-- Light load: package **13.5W** (RAPL) → 54°C → R ≈ 1.0°C/W
-- Heavy: ~70W → 74°C → R ≈ 0.5°C/W at ~80% fan
-- Controller: `fan% = 2.0 × (T − 55)`, silent <58, safety ramp 88→100
-- `EcPollInterval 2000ms`, `MaxSpeedValueRead 8500` (EC reports 7894–8000)
+## Install
 
-## Autostart (all enabled, ONE launch mechanism each)
+```bash
+sudo dnf install nbfc python3-pyside6   # prerequisites (Fedora)
+./install.sh
+```
 
-- `nbfc_service` — fan control (system, boot)
-- `nitro-thermal` — thermal guard (system, boot)
-- `nitro-tray` — tray widget (systemd user service only — **not** XDG autostart; two mechanisms = 2 tray icons bug)
-- Tray has a `QLockFile` single-instance guard (`~/.nitro-tray.lock`) as extra insurance
+Requires: `nbfc` (fan control), `python3-pyside6`, fonts
+*Plus Jakarta Sans* + *JetBrains Mono* for the exact widget look.
+
+## Usage
+
+```bash
+turbo-lvl 1        # chill  (powersave / power / turbo off)
+turbo-lvl 2        # cool
+turbo-lvl 3        # game   (balanced, turbo on)
+turbo-lvl 4        # fast
+turbo-lvl 5        # max    (performance / performance / turbo on)
+turbo-lvl auto     # thermal guard on
+```
+
+- **Left-click** tray icon → glass popup (levels, temps, fans, **Keyboard RGB**)
+- **Right-click** → menu (levels, open panel, RGB panel, quit)
+- Inside the popup: keys **1–5** switch levels, **A** = auto, **Esc** closes
+- RGB state applies instantly in the panel; it is remembered across
+  reboot/suspend automatically
+
+Fan curve lives in `nbfc/Acer-Nitro-AN515-58.json`
+(sensor: CPU fan ← `coretemp`, GPU fan ← `acpitz`, poll 2000 ms).
+
+## Uninstall
+
+```bash
+sudo systemctl disable --now nitro-thermal
+systemctl --user disable --now nitro-tray
+sudo rm /usr/local/bin/nitro-thermal-guard ~/.local/bin/turbo-lvl \
+        ~/.local/bin/nitro-tray /etc/systemd/system/nitro-thermal.service \
+        ~/.config/systemd/user/nitro-tray.service
+rm -rf ~/.local/share/nitro-control
+```
+
+## Thanks
+
+Built on [nbfc-linux](https://github.com/nbclyke/nbfc-linux) (fan EC access)
+and PySide6. MIT — see [LICENSE](LICENSE).

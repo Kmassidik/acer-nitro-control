@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# nitro-tray launcher — runs the nitro_tray package (installed by install.sh)
+export PYTHONPATH="${HOME}/.local/share/nitro-control${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m nitro_tray "$@"

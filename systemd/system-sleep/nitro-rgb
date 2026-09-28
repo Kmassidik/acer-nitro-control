@@ -4,9 +4,12 @@
 [ "$1" = post ] || exit 0
 for h in /home/*; do
     st="$h/.config/nitro-control/rgb.json"
-    pkg="$h/.local/share/nitro-control"
-    [ -f "$st" ] && [ -d "$pkg/nitro_tray" ] || continue
-    PYTHONPATH="$pkg" python3 -m nitro_tray.rgb --state "$st" >/dev/null 2>&1 &
+    [ -f "$st" ] || continue
+    if [ -x "$h/.local/bin/nitro-control" ]; then
+        "$h/.local/bin/nitro-control" --restore-rgb --state "$st" >/dev/null 2>&1 &
+    elif [ -d "$h/.local/share/nitro-control/nitro_tray" ]; then
+        PYTHONPATH="$h/.local/share/nitro-control" python3 -m nitro_tray.rgb --state "$st" >/dev/null 2>&1 &
+    fi
 done
 wait
 exit 0

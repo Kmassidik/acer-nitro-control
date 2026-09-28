@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/nitro-rgb-restore
+ExecStart=%h/.local/bin/nitro-control --restore-rgb
 
 [Install]
 WantedBy=default.target

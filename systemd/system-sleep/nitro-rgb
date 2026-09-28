@@ -1,0 +1,12 @@
+#!/bin/sh
+# systemd-sleep hook: re-apply keyboard RGB after resume (facer keeps state
+# across suspend only sometimes — this makes it deterministic).
+[ "$1" = post ] || exit 0
+for h in /home/*; do
+    st="$h/.config/nitro-control/rgb.json"
+    pkg="$h/.local/share/nitro-control"
+    [ -f "$st" ] && [ -d "$pkg/nitro_tray" ] || continue
+    PYTHONPATH="$pkg" python3 -m nitro_tray.rgb --state "$st" >/dev/null 2>&1 &
+done
+wait
+exit 0

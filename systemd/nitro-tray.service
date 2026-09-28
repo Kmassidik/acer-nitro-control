@@ -7,7 +7,7 @@ PartOf=graphical-session.target
 Type=simple
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
-ExecStart=/home/kurnia/.local/bin/nitro-tray.py
+ExecStart=%h/.local/bin/nitro-tray
 Restart=on-failure
 RestartSec=5
 

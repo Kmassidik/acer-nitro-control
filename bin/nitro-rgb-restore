@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# nitro-rgb-restore — re-apply saved keyboard RGB state (login / manual)
+export PYTHONPATH="${HOME}/.local/share/nitro-control${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 -m nitro_tray.rgb --restore "$@"

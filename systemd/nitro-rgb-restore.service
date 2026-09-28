@@ -1,0 +1,10 @@
+[Unit]
+Description=Restore keyboard RGB state at login
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/nitro-rgb-restore
+
+[Install]
+WantedBy=default.target

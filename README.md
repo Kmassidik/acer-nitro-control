@@ -88,6 +88,12 @@ sudo rm /usr/local/bin/nitro-thermal-guard ~/.local/bin/turbo-lvl \
 rm -rf ~/.local/share/nitro-control
 ```
 
+## Customizing
+
+Want different colors, button sizes, fonts or thresholds? See the human
+guide: **[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md)** — it maps every
+"where do I change X" to a file, with copy-paste examples.
+
 ## Thanks
 
 Built on [nbfc-linux](https://github.com/nbclyke/nbfc-linux) (fan EC access)

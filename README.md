@@ -92,3 +92,4 @@ rm -rf ~/.local/share/nitro-control
 
 Built on [nbfc-linux](https://github.com/nbclyke/nbfc-linux) (fan EC access)
 and PySide6. MIT — see [LICENSE](LICENSE).
+# acer-nitro-control

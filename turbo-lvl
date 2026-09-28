@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# turbo-lvl 1|2|3|auto — 3 CPU levels for Nitro AN515-58
-# 1=chill  2=game  3=max  auto=thermal guard (temp-driven 2<->1)
-case ${1:-2} in
-  auto) echo "18081995" | sudo -S systemctl enable --now nitro-thermal 2>&1 | tail -1; echo "auto: guard ON (lvl2, emergency lvl1 at >=88C, recover <=78C)"; exit 0 ;;
-  1) GOV=powersave; EPP=power;              TURBO=1 ;;
-  2) GOV=powersave; EPP=balance_performance; TURBO=0 ;;
-  3) GOV=performance; EPP=performance;       TURBO=0 ;;
-  *) echo "usage: turbo-lvl 1|2|3|auto"; exit 1 ;;
+# turbo-lvl 1..5|auto — 5 CPU levels for Nitro AN515-58
+# 1=chill  2=cool  3=game  4=fast  5=max  auto=thermal guard (hot->1, recover->3)
+case ${1:-3} in
+  auto) echo "18081995" | sudo -S systemctl enable --now nitro-thermal 2>&1 | tail -1; echo "auto: guard ON (lvl3, emergency lvl1 at >=88C, recover <=78C)"; exit 0 ;;
+  1) GOV=powersave;     EPP=power;               TURBO=1 ;;
+  2) GOV=powersave;     EPP=balance_power;       TURBO=1 ;;
+  3) GOV=powersave;     EPP=balance_performance; TURBO=0 ;;
+  4) GOV=powersave;   EPP=performance;         TURBO=0 ;;
+  5) GOV=performance;   EPP=performance;         TURBO=0 ;;
+  *) echo "usage: turbo-lvl 1|2|3|4|5|auto"; exit 1 ;;
 esac
 echo "18081995" | sudo -S systemctl stop nitro-thermal 2>&1 | head -1
 echo "18081995" | sudo -S bash -c "

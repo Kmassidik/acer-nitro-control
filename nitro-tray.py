@@ -52,11 +52,14 @@ def read_level():
                                capture_output=True, text=True).stdout.strip()
         if guard == "active":
             return "A"
-        if gov == "powersave" and epp == "power" and turbo == "1":
-            return "1"
-        if gov == "performance" and epp == "performance" and turbo == "0":
-            return "3"
-        return "2"
+        combo = (gov, epp, turbo)
+        return {
+            ("powersave", "power", "1"): "1",
+            ("powersave", "balance_power", "1"): "2",
+            ("powersave", "balance_performance", "0"): "3",
+            ("powersave", "performance", "0"): "4",
+            ("performance", "performance", "0"): "5",
+        }.get(combo, "?")
     except Exception:
         return "?"
 
@@ -176,14 +179,15 @@ class Popup(QWidget):
 
         self.btns = {}
         grid = QGridLayout(); grid.setSpacing(6)
-        for i, (k, lab) in enumerate([("1", "1 chill"), ("2", "2 game"),
-                                      ("3", "3 max"), ("A", "Auto")]):
+        for i, (k, lab) in enumerate([("1", "1 chill"), ("2", "2 cool"),
+                                      ("3", "3 game"), ("4", "4 fast"),
+                                      ("5", "5 max"), ("A", "Auto")]):
             b = QPushButton(lab)
             b.setObjectName("lvl")
             b.setCheckable(True)
             b.clicked.connect(lambda _=False, kk=k: self._pick(kk))
             self.btns[k] = b
-            grid.addWidget(b, 0, i)
+            grid.addWidget(b, i // 3, i % 3)
 
         foot = QLabel("hot alert ≥88° · guard: nitro-thermal")
         foot.setObjectName("meta")
@@ -234,7 +238,8 @@ class Popup(QWidget):
             bar.setStyleSheet(f"QProgressBar::chunk {{ background: {bar_color(val)}; }}")
         self.cpu_lbl.setText("CPU")
         self.gpu_lbl.setText("GPU")
-        self.lvl_badge.setText({"A": "auto", "1": "lvl1", "2": "lvl2", "3": "lvl3"}.get(lvl, lvl))
+        self.lvl_badge.setText({"A": "auto", "1": "lvl1", "2": "lvl2", "3": "lvl3",
+                                "4": "lvl4", "5": "lvl5"}.get(lvl, lvl))
         for k, b in self.btns.items():
             b.setChecked(k == lvl)
         fans = read_fans()
@@ -268,8 +273,9 @@ class Tray(QSystemTrayIcon):
         self.group = QActionGroup(self.menu)
         self.group.setExclusive(True)
         self.level_actions = {}
-        for lvl, label in [("1", "lvl1  chill (silent)"), ("2", "lvl2  game (balanced)"),
-                           ("3", "lvl3  max (pinned)"), ("A", "auto  (thermal guard)")]:
+        for lvl, label in [("1", "lvl1  chill (silent)"), ("2", "lvl2  cool (quiet)"),
+                           ("3", "lvl3  game (balanced)"), ("4", "lvl4  fast (responsive)"),
+                           ("5", "lvl5  max (pinned)"), ("A", "auto  (thermal guard)")]:
             a = QAction(label, self.menu)
             a.setCheckable(True)
             a.triggered.connect(lambda _=False, l=lvl: (set_level("auto" if l == "A" else l),

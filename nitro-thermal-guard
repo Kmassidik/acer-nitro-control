@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nitro-thermal-guard — auto shift turbo levels from CPU/GPU temps (runs as root)
-# lvl2 default | T>=88 -> lvl1 (emergency cool) | recover to lvl2 at T<=78
+# lvl3 default | T>=88 -> lvl1 (emergency cool) | recover to lvl3 at T<=78
 set_lvl() {
   local GOV=$1 EPP=$2 TURBO=$3
   for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $GOV > "$f"; done
@@ -8,7 +8,7 @@ set_lvl() {
   echo $TURBO > /sys/devices/system/cpu/intel_pstate/no_turbo
   echo "$(date +%T) thermal-guard -> lvl ($GOV/$EPP/turbo_off=$TURBO)" | systemd-cat -t nitro-thermal -p info 2>/dev/null || logger -t nitro-thermal "lvl $GOV/$EPP/$TURBO"
 }
-LVL=2
+LVL=3
 set_lvl powersave balance_performance 0
 while true; do
   CPU=0
@@ -22,7 +22,7 @@ while true; do
   [ -z "$GPU" ] && GPU=0
   T=$CPU; [ $GPU -gt $T ] && T=$GPU
   if [ $T -ge 88 ] && [ $LVL -ne 1 ]; then LVL=1; set_lvl powersave power 1
-  elif [ $T -le 78 ] && [ $LVL -eq 1 ]; then LVL=2; set_lvl powersave balance_performance 0
+  elif [ $T -le 78 ] && [ $LVL -eq 1 ]; then LVL=3; set_lvl powersave balance_performance 0
   fi
   sleep 5
 done

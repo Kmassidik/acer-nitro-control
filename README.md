@@ -98,4 +98,3 @@ guide: **[docs/CUSTOMIZING.md](docs/CUSTOMIZING.md)** — it maps every
 
 Built on [nbfc-linux](https://github.com/nbclyke/nbfc-linux) (fan EC access)
 and PySide6. MIT — see [LICENSE](LICENSE).
-# acer-nitro-control

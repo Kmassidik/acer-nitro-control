@@ -103,6 +103,13 @@ class Tray(QSystemTrayIcon):
         self.setToolTip(f"Nitro thermal — CPU {cpu}°C GPU {gpu}°C (lvl {lvl})")
 
 def main():
+    # single-instance guard: never register the tray icon twice
+    from PySide6.QtCore import QLockFile, QCoreApplication
+    QCoreApplication.setApplicationName("nitro-tray")
+    lock = QLockFile(str(Path.home() / ".nitro-tray.lock"))
+    if not lock.tryLock(50):
+        print("nitro-tray already running — exiting")
+        return 0
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     QSystemTrayIcon.isSystemTrayAvailable() or sys.exit("no tray")

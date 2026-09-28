@@ -20,16 +20,9 @@ echo "18081995" | sudo -S systemctl daemon-reload
 echo "18081995" | sudo -S systemctl enable --now nbfc_service nitro-thermal
 systemctl --user daemon-reload
 systemctl --user enable --now nitro-tray
-mkdir -p ~/.config/autostart
-cat > ~/.config/autostart/nitro-tray.desktop <<EOF
-[Desktop Entry]
-Name=Nitro Thermal Tray
-Exec=/home/kurnia/.local/bin/nitro-tray.py
-Icon=computer
-Terminal=false
-Type=Application
-X-GNOME-Autostart-enabled=true
-EOF
+# NOTE: no ~/.config/autostart/.desktop here — systemd user service is the
+# single launch mechanism (two mechanisms = 2 tray icons = bug #2)
+rm -f ~/.config/autostart/nitro-tray.desktop
 echo "[4/4] verify"
 systemctl is-enabled nbfc_service nitro-thermal
 systemctl --user is-enabled nitro-tray

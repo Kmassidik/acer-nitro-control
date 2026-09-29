@@ -55,10 +55,6 @@ Builds, installs to `~/.local/bin/nitro-control`, sets up the nbfc fan curve,
 the thermal-guard service and the tray/RGB user services (system parts need
 `sudo`). Verify with `systemctl --user status nitro-tray`.
 
-> **Note:** Qt 6.11 registers the tray icon through `xdg-desktop-portal`, which
-> resolves the desktop entry's `Exec` line against the portal's own `PATH`
-> (no `~/.local/bin` there) — that's why `install.sh` writes an absolute path.
-
 ### CLI
 
 ```
@@ -83,7 +79,6 @@ src/
   tray.*            system-tray icon, menu, hot pulse
   main.cpp          CLI: tray / --restore-rgb / --screenshot
 bin/                turbo-lvl + nitro-thermal-guard helpers
-desktop/            .desktop template (tray registration needs it)
 systemd/            user units + system-sleep RGB hook
 nbfc/               fan curve config
 docs/               screenshots

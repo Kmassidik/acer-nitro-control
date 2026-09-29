@@ -28,9 +28,11 @@ static bool saveShot(QWidget &w, const QString &file)
 
 int main(int argc, char **argv)
 {
-    // Qt 6.11 registers the tray icon via the host portal, which resolves the
-    // app id from the desktop file — an empty id makes registration fail.
-    QGuiApplication::setDesktopFileName("nitro-control");
+    // Keep no desktopFileName: with an app id Qt 6.11 registers the tray via
+    // the host portal, which plasmashell 6.7 does not render. Empty id keeps
+    // the legacy StatusNotifierItem path (what plasmashell displays).
+    // The tray icon also NEEDS QSystemTrayIcon::show() — registration only
+    // happens there (see Tray ctor).
 
     // headless RGB restore (service / sleep hook)
     for (int i = 1; i < argc; ++i)

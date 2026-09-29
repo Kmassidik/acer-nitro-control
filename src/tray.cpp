@@ -33,6 +33,8 @@ Tray::Tray(QObject *parent) : QSystemTrayIcon(parent)
                     openPopup();
             });
     poll();
+    show();   // registers the StatusNotifierItem with the watcher — without
+              // this Qt never exports the icon and nothing shows in the tray
 }
 
 void Tray::buildMenu()

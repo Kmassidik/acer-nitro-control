@@ -28,6 +28,10 @@ static bool saveShot(QWidget &w, const QString &file)
 
 int main(int argc, char **argv)
 {
+    // Qt 6.11 registers the tray icon via the host portal, which resolves the
+    // app id from the desktop file — an empty id makes registration fail.
+    QGuiApplication::setDesktopFileName("nitro-control");
+
     // headless RGB restore (service / sleep hook)
     for (int i = 1; i < argc; ++i)
         if (qstrcmp(argv[i], "--restore-rgb") == 0) {

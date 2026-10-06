@@ -12,7 +12,7 @@ class Segmented : public QWidget
 public:
     explicit Segmented(QWidget *parent = nullptr);
     void setOptions(const QStringList &labels);
-    void select(int idx, bool animated = true);
+    void select(int idx, bool animated = true, bool silent = false);
     int current() const { return m_idx; }
     void setEnabled(bool on);          // dim + ignore input (mock .seg.off)
     void setPillColor(const QColor &c);

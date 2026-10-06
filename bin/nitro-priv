@@ -5,7 +5,15 @@
 #   nitro-priv thermal on | off
 #   nitro-priv cpu GOV EPP TURBO      (fixed tokens; TURBO is 0|1)
 set -u
-logger -t nitro-priv "invoked: $*"
+_chain=""
+_p=$$
+for _i in 1 2 3 4 5; do
+  _ppid=$(ps -o ppid= -p "$_p" 2>/dev/null | tr -d " ")
+  [ -z "$_ppid" ] && break
+  _chain="$_chain<$(ps -o comm= -p "$_ppid" 2>/dev/null)"
+  _p="$_ppid"
+done
+logger -t nitro-priv "invoked: $* from:$_chain"
 
 fail() { logger -t nitro-priv "rejected: $*"; exit 2; }
 

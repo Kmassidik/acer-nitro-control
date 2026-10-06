@@ -85,16 +85,17 @@ void Segmented::placePill(int idx, bool animated)
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
-void Segmented::select(int idx, bool animated)
+void Segmented::select(int idx, bool animated, bool silent)
 {
-    if (idx < 0 || idx >= m_btns.size() || idx == m_idx)
+    if (idx < 0 || idx >= m_btns.size() || (idx == m_idx && !silent))
         return;
     m_idx = idx;
     for (int i = 0; i < m_btns.size(); ++i)
         m_btns[i]->setChecked(i == idx);
     applyAccent();
     placePill(idx, animated);
-    emit selected(idx);
+    if (!silent)
+        emit selected(idx);
 }
 
 void Segmented::setEnabled(bool on)

@@ -258,9 +258,10 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
             applySelection();
             return;
         }
-        // leaving auto: apply current slider duties as manual (DAM engine
-        // semantics), no staged state
-        applyFans();
+        // leaving auto: stage the current SAVED duties in the sliders, but
+        // do NOT write — the Apply button is the commit point (deterministic;
+        // toggle-off writing eased tach values was the ghost-pair bug)
+        m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
     });
     row1->addWidget(r1);
     row1->addStretch();
@@ -452,7 +453,7 @@ void Popup::applyLevel(const QString &lvl, bool fansAuto)
         for (int i = 0; i < cfg::N_MANUAL; ++i)
             if (lvl == QLatin1String(cfg::LEVELS[i].key)) {
                 if (m_seg->current() != i)
-                    m_seg->select(i, false);
+                    m_seg->select(i, false, /*silent=*/true);   // UI sync only!
                 m_desc->setText(QString::fromLatin1(cfg::LEVELS[i].sub));
                 known = true;
                 break;
@@ -483,22 +484,20 @@ void Popup::applySelection()
 
 void Popup::applyFans()
 {
-    // INVARIANT: never commit a manual duty while auto is selected (the
-    // toggle-then-echo race wrote 33/32 three seconds after every 'auto' —
-    // the pending debounce from the echo's valueChanged fired after the
-    // helper had already flipped to the EC curve and re-pinned manual).
+    // INVARIANT: called ONLY from the Apply button (user intent). The old
+    // toggle-off call wrote the eased TACH value as duty (helper journal:
+    // 'fan cpu 59 / fan gpu 57' pairs every second after each auto-toggle —
+    // the ghost pairing). Auto never calls here anymore at all.
     if (m_auto->isChecked())
         return;
-    const int cpu = m_fanCpu->value();
-    const int gpu = m_fanGpu->value();
-    if (cpu >= 0 && cpu == gpu)
-        control::setFanPct(cpu, -1, [this] { refresh(); });
+    const int c = m_fanCpu->value(), g = m_fanGpu->value();
+    if (c == g)
+        control::setFanPct(c, -1, [this] { refresh(); });
     else {
-        if (cpu >= 0)
-            control::setFanPct(cpu, 0, [this] { refresh(); });
-        if (gpu >= 0)
-            control::setFanPct(gpu, 1, [this] { refresh(); });
+        control::setFanPct(c, 0, [this] { refresh(); });
+        control::setFanPct(g, 1, [this] { refresh(); });
     }
+    m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
 }
 
 void Popup::place()

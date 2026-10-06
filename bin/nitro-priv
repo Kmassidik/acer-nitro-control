@@ -1,0 +1,36 @@
+#!/bin/bash
+# nitro-priv — whitelisted root helper for nitro-control (via sudoers NOPASSWD)
+# sudoers authorizes ONLY these exact argument forms; validation here is
+# defense-in-depth and must fail closed:
+#   nitro-priv thermal on | off
+#   nitro-priv cpu GOV EPP TURBO      (fixed tokens; TURBO is 0|1)
+set -u
+
+fail() { logger -t nitro-priv "rejected: $*"; exit 2; }
+
+write_all() { # $1=sysfs filename  $2=value
+  local rc=0 f
+  for f in /sys/devices/system/cpu/cpu*/cpufreq/"$1"; do
+    echo "$2" > "$f" 2>/dev/null || rc=1
+  done
+  [ "$rc" -eq 0 ] || logger -t nitro-priv "WARN: some writes to $1 failed"
+  return $rc
+}
+
+case "$1 $2" in
+  "thermal on")  systemctl enable --now nitro-thermal; exit $? ;;
+  "thermal off") systemctl stop nitro-thermal; exit $? ;;
+  "cpu cpu")     : ;;   # cpu <GOV> <EPP> <TURBO> — validated below
+  *)             fail "cmd '$1 $2'" ;;
+esac
+
+[ "$#" -eq 5 ] || fail "cpu argc=$#"
+case "$3" in powersave|performance|balance_power|balance_performance) ;; *) fail "gov '$3'" ;; esac
+case "$4" in power|balance_power|balance_performance|performance)       ;; *) fail "epp '$4'" ;; esac
+case "$5" in 0|1)                                                       ;; *) fail "turbo '$5'" ;; esac
+
+rc=0
+write_all scaling_governor "$3"                       || rc=1
+write_all energy_performance_preference "$4"          || rc=1
+echo "$5" > /sys/devices/system/cpu/intel_pstate/no_turbo || rc=1
+exit $rc

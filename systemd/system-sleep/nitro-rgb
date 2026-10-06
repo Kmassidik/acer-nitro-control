@@ -5,11 +5,8 @@
 for h in /home/*; do
     st="$h/.config/nitro-control/rgb.json"
     [ -f "$st" ] || continue
-    if [ -x "$h/.local/bin/nitro-control" ]; then
-        "$h/.local/bin/nitro-control" --restore-rgb --state "$st" >/dev/null 2>&1 &
-    elif [ -d "$h/.local/share/nitro-control/nitro_tray" ]; then
-        PYTHONPATH="$h/.local/share/nitro-control" python3 -m nitro_tray.rgb --state "$st" >/dev/null 2>&1 &
-    fi
+    [ -x "$h/.local/bin/nitro-control" ] || continue
+    "$h/.local/bin/nitro-control" --restore-rgb --state "$st" >/dev/null 2>&1 &
 done
 wait
 exit 0

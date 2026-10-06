@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
-# turbo-lvl 1..5|auto — 5 CPU levels for Nitro AN515-58
+# turbo-lvl 1..5|auto — CPU levels for Nitro AN515-58 (root work via nitro-priv)
 # 1=chill  2=cool  3=game  4=fast  5=max  auto=thermal guard (hot->1, recover->3)
+LEVEL_GOV=(powersave powersave powersave powersave performance)
+LEVEL_EPP=(power balance_power balance_performance performance performance)
+LEVEL_TURBO=(1 1 0 0 0)
+PRIV=/usr/local/bin/nitro-priv
+
 case ${1:-3} in
-  auto) echo "REDACTED" | sudo -S systemctl enable --now nitro-thermal 2>&1 | tail -1; echo "auto: guard ON (lvl3, emergency lvl1 at >=88C, recover <=78C)"; exit 0 ;;
-  1) GOV=powersave;     EPP=power;               TURBO=1 ;;
-  2) GOV=powersave;     EPP=balance_power;       TURBO=1 ;;
-  3) GOV=powersave;     EPP=balance_performance; TURBO=0 ;;
-  4) GOV=powersave;   EPP=performance;         TURBO=0 ;;
-  5) GOV=performance;   EPP=performance;         TURBO=0 ;;
+  auto)
+    sudo -n "$PRIV" thermal on && echo "auto: guard ON (lvl3 baseline, emergency lvl1 at >=88C, recover <=80C)"
+    exit $?
+    ;;
+  [1-5])
+    i=$((10#$1 - 1))
+    GOV=${LEVEL_GOV[$i]} EPP=${LEVEL_EPP[$i]} TURBO=${LEVEL_TURBO[$i]}
+    ;;
   *) echo "usage: turbo-lvl 1|2|3|4|5|auto"; exit 1 ;;
 esac
-echo "REDACTED" | sudo -S systemctl stop nitro-thermal 2>&1 | head -1
-echo "REDACTED" | sudo -S bash -c "
-for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $GOV > \"\$f\"; done
-for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo $EPP > \"\$f\"; done
-echo $TURBO > /sys/devices/system/cpu/intel_pstate/no_turbo" 2>&1 | head -2
-echo "manual lvl$1 (guard OFF): $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)/$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference)/turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
+
+sudo -n "$PRIV" thermal off
+if sudo -n "$PRIV" cpu "$GOV" "$EPP" "$TURBO"; then
+  echo "manual lvl$1 (guard OFF): $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)/$(cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference)/turbo_off=$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)"
+else
+  echo "lvl$1: apply failed (see journal for nitro-priv)" >&2
+  exit 1
+fi

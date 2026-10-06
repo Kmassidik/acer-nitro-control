@@ -13,11 +13,20 @@ mkdir -p ~/.local/bin
 cp "$D/build/nitro-control" ~/.local/bin/nitro-control
 chmod +x ~/.local/bin/nitro-control
 
-echo "[3/7] helpers -> ~/.local/bin + /usr/local/bin"
-cp "$D/bin/turbo-lvl" ~/.local/bin/turbo-lvl
-chmod +x ~/.local/bin/turbo-lvl
-sudo cp "$D/bin/nitro-thermal-guard" /usr/local/bin/nitro-thermal-guard
-sudo chmod +x /usr/local/bin/nitro-thermal-guard
+echo "[3/7] helpers -> /usr/local/bin + sudoers rule"
+sudo install -m 0755 "$D/bin/nitro-priv" /usr/local/bin/nitro-priv
+sudo install -m 0755 "$D/bin/turbo-lvl" /usr/local/bin/turbo-lvl
+sudo install -m 0755 "$D/bin/nitro-thermal-guard" /usr/local/bin/nitro-thermal-guard
+SUDOERS_FILE=/etc/sudoers.d/nitro-control
+sudo tee "$SUDOERS_FILE" >/dev/null <<EOF
+# nitro-control: passwordless root for the whitelisted helper only.
+# Each line authorizes ONE exact argv; anything else still prompts/denies.
+${SUDO_USER:-$USER} ALL=(root) NOPASSWD: /usr/local/bin/nitro-priv thermal on
+${SUDO_USER:-$USER} ALL=(root) NOPASSWD: /usr/local/bin/nitro-priv thermal off
+${SUDO_USER:-$USER} ALL=(root) NOPASSWD: /usr/local/bin/nitro-priv cpu *
+EOF
+sudo chmod 440 "$SUDOERS_FILE"
+sudo visudo -c -f "$SUDOERS_FILE" || exit 1
 
 echo "[4/7] fan curve -> nbfc config (backs up old)"
 CFG="/usr/local/share/nbfc/configs/Acer Nitro AN515-58.json"

@@ -17,6 +17,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/io.h>
+#include <sys/stat.h>
+#include <ctime>
 
 static void wibf(void){ while (inb(0x66) & 0x02) {} }
 static void wobf(void){ int t = 100000; while (!(inb(0x66) & 0x01) && --t) {} }
@@ -45,6 +47,22 @@ int main(int argc, char **argv)
     if (geteuid() != 0) { fprintf(stderr, "root only\n"); return 1; }
     if (argc < 2 || argc > 3) { fprintf(stderr, "usage: nitro-fan <0..100|auto|cpu PCT|gpu PCT|status>\n"); return 2; }
     if (ioperm(0x62, 1, 1) || ioperm(0x66, 1, 1)) { perror("ioperm"); return 1; }
+
+    // SERVER-SIDE auto-guard: after 'auto' is committed, manual duty writes
+    // are rejected for 5 s (UI bugs can't fight the curve — the helper is
+    // the kernel-side single point of truth). Late check readdir mtime.
+    struct stat st{};
+    const int isManualWrite = (strcmp(argv[1], "auto") != 0 && strcmp(argv[1], "status") != 0);
+    if (isManualWrite && stat("/var/lib/nitro-control/fanmode", &st) == 0) {
+        FILE *f = fopen("/var/lib/nitro-control/fanmode", "r");
+        int mode = 0;
+        if (f) { if (fscanf(f, "%d", &mode) != 1) mode = 0; fclose(f); }
+        const double age = difftime(time(nullptr), st.st_mtime);
+        if (mode == 1 && age < 5.0) {
+            fprintf(stderr, "rejected: auto just applied (%.1fs ago)\n", age);
+            return 3;
+        }
+    }
 
     if (strcmp(argv[1], "status") == 0) {
         // Tach words are trustworthy; the 0x33/0x34 mode registers are NOT —

@@ -21,8 +21,18 @@ static unsigned char rd(unsigned char r)
     wibf(); outb(r, 0x62);
     wobf(); return inb(0x62);
 }
+// EC re-locks after EVERY write — the unlock (0x03=0x51) must precede each
+// register write, not once per command batch (nbfc re-unlocks every cycle;
+// a single unlock made only the first write stick, the rest silently dropped).
 static void ecwr(unsigned char r, unsigned char v)
 {
+    // unlock: cmd 0x81, reg 0x03, value 0x51 — the EC re-locks after EVERY
+    // write, so this must precede each register write (a single unlock at
+    // batch start made only the first write stick — the stuck-fan bug).
+    wibf(); outb(0x81, 0x66);
+    wibf(); outb(0x03, 0x62);
+    wibf(); outb(0x51, 0x62);
+    // then the real write
     wibf(); outb(0x81, 0x66);
     wibf(); outb(r, 0x62);
     wibf(); outb(v, 0x62);

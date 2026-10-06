@@ -384,11 +384,13 @@ void Popup::refresh()
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;
+        m_programmatic = true;   // setValue() fires valueChanged → CPU/GPU row
+        // handlers call scheduleFanWrite() — without this guard the echo
+        // write-backs re-pin the user's duty EVERY second (the stuck-fan bug)
         if (!inGrace && !m_fanCpu->isSliderDown() && m_fanCpu->value() != showC)
             m_fanCpu->setValue(showC);
         if (!inGrace && !m_fanGpu->isSliderDown() && m_fanGpu->value() != showG)
             m_fanGpu->setValue(showG);
-        m_programmatic = true;
         m_fanCpuVal->setText(QString("%1%").arg(showC));
         m_fanGpuVal->setText(QString("%1%").arg(showG));
         m_fanAllVal->setText(m_fanCpu->value() == m_fanGpu->value()

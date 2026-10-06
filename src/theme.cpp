@@ -59,13 +59,13 @@ QLabel#chip { background: transparent; color: #cba6f7; font-size: 12px; font-fam
 QFrame#lvlBtn { background: transparent; border: none; border-radius: 4px; }
 QFrame#lvlBtn:hover { background: rgba(255,255,255,0.04); }
 QFrame#lvlBtn[active="true"] {
-  background: #cba6f7; border-radius: 4px;
+  background: #313244; border: 1px solid rgba(255,255,255,0.08); border-radius: 4px;
 }
-QFrame#lvlBtn[active="true"]:hover { background: #cba6f7; }
+QFrame#lvlBtn[active="true"]:hover { background: #45475a; }
 QLabel#btnTitle { color: #9399b2; font-size: 13px; font-family: "%2"; background: transparent; }
 QLabel#btnSub { color: #6c7086; font-size: 12px; font-family: "%2"; background: transparent; }
-QFrame#lvlBtn[active="true"] QLabel#btnTitle { color: #1e1e2e; font-weight: bold; }
-QFrame#lvlBtn[active="true"] QLabel#btnSub { color: rgba(30,30,46,0.75); }
+QFrame#lvlBtn[active="true"] QLabel#btnTitle { color: #cdd6f4; font-weight: bold; }
+QFrame#lvlBtn[active="true"] QLabel#btnSub { color: #6c7086; }
 QLabel#foot { color: #6c7086; font-size: 12px; font-family: "%2"; background: transparent; }
 QLabel#footG { color: #a6e3a1; font-size: 12px; font-family: "%2"; background: transparent; }
 QPushButton#x { color: #6c7086; border: none; background: transparent; font-size: 16px; padding: 0 4px; }

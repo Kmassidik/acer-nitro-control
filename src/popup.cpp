@@ -5,6 +5,8 @@
 #include "sensors.h"
 #include "theme.h"
 
+#include <QAbstractButton>
+#include <QAbstractSlider>
 #include <QColor>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -16,10 +18,9 @@
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWindow>
 
 namespace {
-const char *kSpin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-
 QString repeat(const QString &s, int n) { return s.repeated(qMax(0, n)); }
 
 QString fmtRpm(int v)
@@ -56,17 +57,6 @@ QString rpmBar(int v, int max)
              "#313244", repeat("▯", 12 - filled));
 }
 
-QString spinnerHTML(int rpm, double phase, bool stalled)
-{
-    if (stalled)
-        return "<span style='color:#f38ba8'>stalled</span>";
-    if (rpm < 50)
-        return "<span style='color:#6c7086'>·</span>";
-    const int i = int(phase) % 10;
-    return QString("<span style='color:#94e2d5'>%1</span>")
-        .arg(QLatin1Char(kSpin[i]));
-}
-
 QString modeAliasFor(const QString &key)
 {
     if (key == "A") return "auto";
@@ -92,6 +82,20 @@ void setPropertyActive(QWidget *w, bool on)
     w->style()->unpolish(w);
     w->style()->polish(w);
 }
+
+bool isInteractiveControl(QObject *o)
+{
+    for (; o; o = o->parent()) {
+        if (const auto *w = qobject_cast<const QWidget *>(o)) {
+            if (qobject_cast<const QAbstractButton *>(w) ||
+                qobject_cast<const QAbstractSlider *>(w) ||
+                w->objectName() == "lvlBtn" ||
+                w->objectName() == "swatch")
+                return true;
+        }
+    }
+    return false;
+}
 } // namespace
 
 static QFrame *makeHLine(QWidget *parent)
@@ -109,37 +113,26 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
 {
     setAttribute(Qt::WA_TranslucentBackground, true);
     setStyleSheet(theme::stylesheet());
-    setFixedWidth(360);
+    setMinimumWidth(360);
 
     auto *panel = new QFrame(this);
     panel->setObjectName("panel");
 
-    auto *topRow = new QHBoxLayout;
-    auto *x = new QPushButton("×");
-    x->setObjectName("x");
-    connect(x, &QPushButton::clicked, this, &QWidget::hide);
-    topRow->addStretch();
-    topRow->addWidget(x);
-
-    // tab bar
-    auto *tabs = new QHBoxLayout;
-    auto *tabNitro = new QPushButton("👻 nitro");
-    tabNitro->setObjectName("tab");
-    setPropertyActive(tabNitro, true);
-    auto *tabRgb = new QPushButton("rgb");
-    tabRgb->setObjectName("tab");
-    setPropertyActive(tabRgb, false);
-    connect(tabRgb, &QPushButton::clicked, this, [this] { m_openRgb(); });
-    auto *tabLog = new QPushButton("log");
-    tabLog->setObjectName("tab");
-    setPropertyActive(tabLog, false);
-    connect(tabLog, &QPushButton::clicked, this, [this] {
-        m_log->setVisible(!m_log->isVisible());
-    });
-    tabs->addWidget(tabNitro);
-    tabs->addWidget(tabRgb);
-    tabs->addWidget(tabLog);
-    tabs->addStretch();
+    // custom controls — no native header/decorations
+    auto *controls = new QHBoxLayout;
+    controls->addStretch();
+    auto *min = new QPushButton("–");
+    min->setObjectName("x");
+    auto *max = new QPushButton("□");
+    max->setObjectName("x");
+    auto *close = new QPushButton("×");
+    close->setObjectName("x");
+    connect(min, &QPushButton::clicked, this, &QWidget::showMinimized);
+    connect(max, &QPushButton::clicked, this, &Popup::toggleMax);
+    connect(close, &QPushButton::clicked, this, &QWidget::hide);
+    controls->addWidget(min);
+    controls->addWidget(max);
+    controls->addWidget(close);
 
     // prompt
     auto *prompt = new QLabel;
@@ -158,11 +151,7 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_gpuBlock->setObjectName("term");
     m_gpuBlock->setTextFormat(Qt::RichText);
 
-    m_log = new QLabel;
-    m_log->setObjectName("load");
-    m_log->setVisible(false);
-
-    auto *modeTitle = new QLabel(QStringLiteral("`fan --mode (press 1-6)`"));
+    auto *modeTitle = new QLabel(QStringLiteral("fan --mode (press 1-6)"));
     modeTitle->setObjectName("term");
     modeTitle->setStyleSheet("color:#6c7086;");
 
@@ -176,42 +165,61 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
             const QString key = (k == "auto") ? "A" : (k == "chill" ? "1" :
                                (k == "cool" ? "2" : (k == "game" ? "3" :
                                (k == "fast" ? "4" : "5"))));
-            control::setLevel(key);
-            refresh();
+            m_pendingLevel = key;
+            updateModeUi(m_level);
         });
         m_btns[alias] = b;
         modes->addWidget(b);
     }
+
+    m_modeStatus = new QLabel;
+    m_modeStatus->setObjectName("load");
+    m_modeStatus->setText("active: ?");
+
+    m_applyBtn = new QPushButton("Apply");
+    m_applyBtn->setObjectName("applyBtn");
+    connect(m_applyBtn, &QPushButton::clicked, this, [this] {
+        if (!m_pendingLevel.isEmpty()) {
+            const QString applied = m_pendingLevel;
+            m_applyBtn->setText(QString("Applying %1…").arg(modeAliasFor(applied)));
+            m_applyBtn->setEnabled(false);
+            m_modeStatus->setText(QString("applying: %1…").arg(modeAliasFor(applied)));
+            repaint();
+            control::setLevel(applied);
+            m_pendingLevel.clear();
+            m_applyBtn->setEnabled(true);
+            refresh();
+        }
+    });
 
     auto *foot = new QLabel;
     foot->setObjectName("term");
     foot->setText("<span style='color:#6c7086'>alert ≥88° · guard nitro-thermal</span>");
     foot->setTextFormat(Qt::RichText);
 
-    auto *bottomPrompt = new QLabel;
-    bottomPrompt->setObjectName("term");
-    m_cursor = bottomPrompt;
-    bottomPrompt->setTextFormat(Qt::RichText);
-    bottomPrompt->setText("<span style='color:#a6e3a1'>❯</span> <span style='color:#cdd6f4'>█</span>");
-
     auto *lay = new QVBoxLayout(panel);
     lay->setContentsMargins(12, 10, 12, 12);
     lay->setSpacing(8);
-    lay->addLayout(topRow);
-    lay->addLayout(tabs);
+    lay->addLayout(controls);
     lay->addWidget(prompt);
     lay->addSpacing(2);
     lay->addWidget(m_cpuBlock);
     lay->addWidget(m_gpuBlock);
-    lay->addWidget(m_log);
     lay->addWidget(modeTitle);
     lay->addLayout(modes);
+    lay->addWidget(m_modeStatus);
+    lay->addWidget(m_applyBtn);
     lay->addWidget(foot);
-    lay->addWidget(bottomPrompt);
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addWidget(panel);
+
+    // Drag from any non-interactive area (labels/background), not from
+    // buttons, sliders, swatches or mode rows.
+    for (QWidget *child : findChildren<QWidget *>())
+        child->installEventFilter(this);
+    installEventFilter(this);
 
     m_timer = new QTimer(this);
     m_timer->setInterval(1000);
@@ -229,17 +237,6 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         if (m_uiGpuRpm >= 50) m_gpuPhase += m_uiGpuRpm / 2200.0;
         updateBlocks();
     });
-
-    m_cursorBlink = new QTimer(this);
-    m_cursorBlink->setInterval(500);
-    connect(m_cursorBlink, &QTimer::timeout, this, [this] {
-        static bool on = true;
-        on = !on;
-        m_cursor->setText(on
-            ? "<span style='color:#a6e3a1'>❯</span> <span style='color:#cdd6f4'>█</span>"
-            : "<span style='color:#a6e3a1'>❯</span> <span style='color:#313244'>█</span>");
-    });
-    m_cursorBlink->start();
 }
 
 void Popup::toggle()
@@ -253,7 +250,36 @@ void Popup::toggle()
     show();
     m_timer->start();
     m_anim->start();
-    m_cursorBlink->start();
+}
+
+bool Popup::eventFilter(QObject *watched, QEvent *event)
+{
+    const QEvent::Type type = event->type();
+    if (!m_maximized && (type == QEvent::MouseButtonPress ||
+                         type == QEvent::MouseMove ||
+                         type == QEvent::MouseButtonRelease)) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (!isInteractiveControl(watched)) {
+            if (type == QEvent::MouseButtonPress && me->button() == Qt::LeftButton) {
+                if (QWindow *h = windowHandle()) {
+                    h->startSystemMove();
+                } else {
+                    m_dragging = true;
+                    m_dragPos = me->globalPosition().toPoint() - frameGeometry().topLeft();
+                }
+                return false;
+            }
+            if (type == QEvent::MouseMove && m_dragging && (me->buttons() & Qt::LeftButton)) {
+                move(me->globalPosition().toPoint() - m_dragPos);
+                return true;
+            }
+            if (type == QEvent::MouseButtonRelease)
+                m_dragging = false;
+        } else if (type == QEvent::MouseButtonPress) {
+            m_dragging = false;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void Popup::place()
@@ -281,10 +307,8 @@ void Popup::updateBlocks()
 
     auto blockHTML = [&](const QString &name, int t, int rpm, double phase, bool stalled, const QColor &col) {
         const QString tb = tempBar(t);
-        const QString sp = spinnerHTML(rpm, phase, stalled);
         const QString rb = rpmBar(stalled ? 0 : rpm, 8500);
-        QString line2 = QString("&#160;&#160;%1 <span style='color:#6c7086'>fan</span> ")
-                            .arg(sp);
+        QString line2 = QString("&#160;&#160;<span style='color:#6c7086'>fan</span> ");
         if (stalled)
             line2 += "<span style='color:#f38ba8'>stalled</span> <span style='color:#6c7086'>rpm</span> <span style='color:#313244'>" + repeat("▯", 12) + "</span>";
         else
@@ -305,10 +329,12 @@ void Popup::updateBlocks()
                        .arg(c1.name(),
                             QString::number(m_cpuTempVal).rightJustified(3, ' ').replace(' ', QStringLiteral("&#160;")),
                             tempBar(m_cpuTempVal));
-    QString cpu2 = QString("&#160;&#160;%1 <span style='color:#6c7086'>fan</span> ")
-                       .arg(spinnerHTML(m_uiCpuRpm, m_cpuPhase, cpuStalled));
+    const QString cpuPrefix = cpuStalled
+        ? QStringLiteral("<span style='color:#f38ba8'>stalled</span>&#160;")
+        : QStringLiteral("&#160;&#160;");
+    QString cpu2 = QString("%1<span style='color:#6c7086'>fan</span> ").arg(cpuPrefix);
     if (cpuStalled)
-        cpu2 += QString("<span style='color:#f38ba8'>stalled</span> <span style='color:#6c7086'>rpm</span> <span style='color:#313244'>%1</span>")
+        cpu2 += QString("<span style='color:#6c7086'>rpm</span> <span style='color:#313244'>%1</span>")
                     .arg(rpmBar(0, 8500));
     else
         cpu2 += QString("<span style='color:#89b4fa'>%1</span> <span style='color:#6c7086'>rpm</span> <span style='color:#94e2d5'>%2</span>")
@@ -321,10 +347,12 @@ void Popup::updateBlocks()
                        .arg(c2.name(),
                             QString::number(m_gpuTempVal).rightJustified(3, ' ').replace(' ', QStringLiteral("&#160;")),
                             tempBar(m_gpuTempVal));
-    QString gpu2 = QString("&#160;&#160;%1 <span style='color:#6c7086'>fan</span> ")
-                       .arg(spinnerHTML(m_uiGpuRpm, m_gpuPhase, gpuStalled));
+    const QString gpuPrefix = gpuStalled
+        ? QStringLiteral("<span style='color:#f38ba8'>stalled</span>&#160;")
+        : QStringLiteral("&#160;&#160;");
+    QString gpu2 = QString("%1<span style='color:#6c7086'>fan</span> ").arg(gpuPrefix);
     if (gpuStalled)
-        gpu2 += QString("<span style='color:#f38ba8'>stalled</span> <span style='color:#6c7086'>rpm</span> <span style='color:#313244'>%1</span>")
+        gpu2 += QString("<span style='color:#6c7086'>rpm</span> <span style='color:#313244'>%1</span>")
                     .arg(rpmBar(0, 8500));
     else
         gpu2 += QString("<span style='color:#89b4fa'>%1</span> <span style='color:#6c7086'>rpm</span> <span style='color:#94e2d5'>%2</span>")
@@ -347,40 +375,99 @@ void Popup::refresh()
         const double g0 = fans[1].steps > 0 ? fans[1].steps : 6000;
         m_targetCpuRpm = qRound(fans[0].cur / 100.0 * c0);
         m_targetGpuRpm = qRound(fans[1].cur / 100.0 * g0);
-        m_log->setText(QString("temp cpu:%1°C gpu:%2°C · cpu fan:%3%% · gpu fan:%4%%")
-                           .arg(cpu).arg(gpu)
-                           .arg(int(fans[0].cur)).arg(int(fans[1].cur)));
     } else {
         m_targetCpuRpm = 0;
         m_targetGpuRpm = 0;
-        m_log->setText("nbfc unavailable");
     }
 
-    for (auto it = m_btns.begin(); it != m_btns.end(); ++it)
-        it.value()->setActive(it.key() == modeAliasFor(lvl));
+    const QString shownLevel = !m_pendingLevel.isEmpty() ? m_pendingLevel : lvl;
+    updateModeUi(shownLevel);
     updateBlocks();
+}
+
+void Popup::updateModeUi(const QString &shownLevel)
+{
+    const QString alias = modeAliasFor(shownLevel);
+    for (auto it = m_btns.begin(); it != m_btns.end(); ++it)
+        it.value()->setActive(it.key() == alias);
+    if (!m_pendingLevel.isEmpty()) {
+        m_applyBtn->setText(QString("Apply %1").arg(modeAliasFor(m_pendingLevel)));
+        m_modeStatus->setText(QString("selected: %1 — press Apply").arg(modeAliasFor(m_pendingLevel)));
+    } else {
+        m_applyBtn->setText("Apply");
+        m_modeStatus->setText(QString("active: %1").arg(alias));
+    }
+}
+
+void Popup::toggleMax()
+{
+    if (m_maximized) {
+        setGeometry(m_normalGeo);
+        m_maximized = false;
+    } else {
+        m_normalGeo = geometry();
+        QScreen *screen = QGuiApplication::screenAt(geometry().center());
+        if (!screen) screen = QGuiApplication::primaryScreen();
+        setGeometry(screen->availableGeometry());
+        m_maximized = true;
+    }
 }
 
 void Popup::hideEvent(QHideEvent *ev)
 {
     m_timer->stop();
     m_anim->stop();
-    m_cursorBlink->stop();
     QWidget::hideEvent(ev);
 }
 
 void Popup::keyPressEvent(QKeyEvent *ev)
 {
     const QString t = ev->text();
-    if (t == "1") { control::setLevel("1"); refresh(); return; }
-    if (t == "2") { control::setLevel("2"); refresh(); return; }
-    if (t == "3") { control::setLevel("3"); refresh(); return; }
-    if (t == "4") { control::setLevel("4"); refresh(); return; }
-    if (t == "5") { control::setLevel("5"); refresh(); return; }
-    if (t == "6" || t.compare("a", Qt::CaseInsensitive) == 0) { control::setLevel("A"); refresh(); return; }
+    if (t == "1") { m_pendingLevel = "1"; updateModeUi("1"); return; }
+    if (t == "2") { m_pendingLevel = "2"; updateModeUi("2"); return; }
+    if (t == "3") { m_pendingLevel = "3"; updateModeUi("3"); return; }
+    if (t == "4") { m_pendingLevel = "4"; updateModeUi("4"); return; }
+    if (t == "5") { m_pendingLevel = "5"; updateModeUi("5"); return; }
+    if (t == "6" || t.compare("a", Qt::CaseInsensitive) == 0) { m_pendingLevel = "A"; updateModeUi("A"); return; }
+    if (ev->key() == Qt::Key_Return || ev->key() == Qt::Key_Enter) {
+        if (!m_pendingLevel.isEmpty()) {
+            const QString applied = m_pendingLevel;
+            m_applyBtn->setText(QString("Applying %1…").arg(modeAliasFor(applied)));
+            m_applyBtn->setEnabled(false);
+            m_modeStatus->setText(QString("applying: %1…").arg(modeAliasFor(applied)));
+            repaint();
+            control::setLevel(applied);
+            m_pendingLevel.clear();
+            m_applyBtn->setEnabled(true);
+            refresh();
+        }
+        return;
+    }
     if (ev->key() == Qt::Key_Escape) {
         hide();
         return;
     }
     QWidget::keyPressEvent(ev);
+}
+
+void Popup::mousePressEvent(QMouseEvent *ev)
+{
+    if (ev->button() == Qt::LeftButton) {
+        m_dragging = true;
+        m_dragPos = ev->globalPosition().toPoint() - frameGeometry().topLeft();
+    }
+    QWidget::mousePressEvent(ev);
+}
+
+void Popup::mouseMoveEvent(QMouseEvent *ev)
+{
+    if (m_dragging)
+        move(ev->globalPosition().toPoint() - m_dragPos);
+    QWidget::mouseMoveEvent(ev);
+}
+
+void Popup::mouseReleaseEvent(QMouseEvent *ev)
+{
+    m_dragging = false;
+    QWidget::mouseReleaseEvent(ev);
 }

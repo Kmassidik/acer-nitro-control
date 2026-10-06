@@ -34,6 +34,15 @@ void LevelButton::setActive(bool on)
     m_active = on;
     setProperty("active", on);
     m_title->setText((on ? QStringLiteral("▸ ") : QStringLiteral("  ")) + m_titleText);
+    QFont f = m_title->font();
+    f.setWeight(on ? QFont::Bold : QFont::Normal);
+    m_title->setFont(f);
+    m_title->setStyleSheet(on
+        ? QStringLiteral("color:#cdd6f4;")
+        : QStringLiteral("color:#9399b2;"));
+    m_sub->setStyleSheet(on
+        ? QStringLiteral("color:#6c7086;")
+        : QStringLiteral("color:#6c7086;"));
     style()->unpolish(this);
     style()->polish(this);
 }

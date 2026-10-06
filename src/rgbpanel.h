@@ -3,6 +3,8 @@
 #include <QFrame>
 #include <QHash>
 #include <QJsonObject>
+#include <QPoint>
+#include <QRect>
 #include <QWidget>
 #include <functional>
 
@@ -37,14 +39,23 @@ public:
 
 protected:
     void showEvent(QShowEvent *ev) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
+    void mousePressEvent(QMouseEvent *ev) override;
+    void mouseMoveEvent(QMouseEvent *ev) override;
+    void mouseReleaseEvent(QMouseEvent *ev) override;
 
 private:
     void loadUi();
     void pickZone(int idx);
     void pickFx();
     void apply();
+    void toggleMax();
 
     QJsonObject m_state;
+    bool m_dragging = false;
+    QPoint m_dragPos;
+    bool m_maximized = false;
+    QRect m_normalGeo;
     Swatch *m_zones[4];
     Swatch *m_fx;
     QPushButton *m_sync;

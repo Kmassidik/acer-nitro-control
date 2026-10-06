@@ -4,15 +4,20 @@
 #include "levelbutton.h"
 #include "theme.h"
 
+#include <QAbstractButton>
+#include <QAbstractSlider>
 #include <QColorDialog>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QScreen>
 #include <QSlider>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <QWindow>
 
 // ---------------- Swatch ----------------
 Swatch::Swatch(QWidget *parent) : QFrame(parent)
@@ -52,57 +57,44 @@ static QFrame *makeHLine(QWidget *parent)
     return ln;
 }
 
+bool isInteractiveControl(QObject *o)
+{
+    for (; o; o = o->parent()) {
+        if (const auto *w = qobject_cast<const QWidget *>(o)) {
+            if (qobject_cast<const QAbstractButton *>(w) ||
+                qobject_cast<const QAbstractSlider *>(w) ||
+                w->objectName() == "lvlBtn" ||
+                w->objectName() == "swatch")
+                return true;
+        }
+    }
+    return false;
+}
+
 RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
-    : QWidget(parent, Qt::FramelessWindowHint | Qt::Tool), m_openPopup(std::move(openPopup))
+    : QWidget(parent, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool), m_openPopup(std::move(openPopup))
 {
     setAttribute(Qt::WA_TranslucentBackground, true);
     setStyleSheet(theme::stylesheet());
-    setFixedWidth(360);
+    setMinimumWidth(360);
 
     auto *panel = new QFrame(this);
     panel->setObjectName("panel");
 
-    auto *topRow = new QHBoxLayout;
-    auto *x = new QPushButton("×");
-    x->setObjectName("x");
-    connect(x, &QPushButton::clicked, this, &QWidget::hide);
-    topRow->addStretch();
-    topRow->addWidget(x);
-
-    // tab bar
-    auto *tabs = new QHBoxLayout;
-    auto *tabNitro = new QPushButton("👻 nitro");
-    tabNitro->setObjectName("tab");
-    tabNitro->setProperty("active", false);
-    connect(tabNitro, &QPushButton::clicked, this, [this] {
-        if (m_openPopup) m_openPopup();
-    });
-    auto *tabRgb = new QPushButton("rgb");
-    tabRgb->setObjectName("tab");
-    tabRgb->setProperty("active", true);
-    auto *tabLog = new QPushButton("log");
-    tabLog->setObjectName("tab");
-    tabLog->setProperty("active", false);
-    connect(tabLog, &QPushButton::clicked, this, [this] {
-        m_status->setVisible(true);
-        m_status->setText(QStringLiteral("state mode:%1 speed:%2 bright:%3%")
-                              .arg(m_state["mode"].toInt())
-                              .arg(m_state["speed"].toInt())
-                              .arg(m_state["brightness"].toInt()));
-    });
-    tabs->addWidget(tabNitro);
-    tabs->addWidget(tabRgb);
-    tabs->addWidget(tabLog);
-    tabs->addStretch();
-
-    // prompt
-    auto *prompt = new QLabel;
-    prompt->setObjectName("term");
-    prompt->setText(
-        "<span style='color:#6c7086'>~/AN515-58</span> "
-        "<span style='color:#a6e3a1'>❯</span> "
-        "<span style='color:#89b4fa'>rgb --watch</span>");
-    prompt->setTextFormat(Qt::RichText);
+    auto *controls = new QHBoxLayout;
+    controls->addStretch();
+    auto *min = new QPushButton("–");
+    min->setObjectName("x");
+    auto *max = new QPushButton("□");
+    max->setObjectName("x");
+    auto *close = new QPushButton("×");
+    close->setObjectName("x");
+    connect(min, &QPushButton::clicked, this, &QWidget::showMinimized);
+    connect(max, &QPushButton::clicked, this, &RgbPanel::toggleMax);
+    connect(close, &QPushButton::clicked, this, &QWidget::hide);
+    controls->addWidget(min);
+    controls->addWidget(max);
+    controls->addWidget(close);
 
     // zones + sync
     auto *zrow = new QHBoxLayout;
@@ -196,19 +188,10 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     m_status->setTextFormat(Qt::RichText);
     m_status->setText("<span style='color:#6c7086'>ready</span>");
 
-    auto *bottomPrompt = new QLabel;
-    bottomPrompt->setObjectName("term");
-    bottomPrompt->setTextFormat(Qt::RichText);
-    bottomPrompt->setText(
-        "<span style='color:#a6e3a1'>❯</span> <span style='color:#6c7086'>apply --state</span>");
-
     auto *lay = new QVBoxLayout(panel);
     lay->setContentsMargins(12, 10, 12, 12);
     lay->setSpacing(10);
-    lay->addLayout(topRow);
-    lay->addLayout(tabs);
-    lay->addWidget(prompt);
-    lay->addSpacing(2);
+    lay->addLayout(controls);
     lay->addLayout(zrow);
     lay->addLayout(frow);
     lay->addLayout(modes);
@@ -216,11 +199,84 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     lay->addLayout(brightRow);
     lay->addWidget(applyBtn);
     lay->addWidget(m_status);
-    lay->addWidget(bottomPrompt);
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addWidget(panel);
+
+    // Drag from any non-interactive area (labels/background), not from
+    // buttons, sliders, swatches or mode rows.
+    for (QWidget *child : findChildren<QWidget *>())
+        child->installEventFilter(this);
+    installEventFilter(this);
+}
+
+bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    const QEvent::Type type = event->type();
+    if (!m_maximized && (type == QEvent::MouseButtonPress ||
+                         type == QEvent::MouseMove ||
+                         type == QEvent::MouseButtonRelease)) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (!isInteractiveControl(watched)) {
+            if (type == QEvent::MouseButtonPress && me->button() == Qt::LeftButton) {
+                if (QWindow *h = windowHandle()) {
+                    h->startSystemMove();
+                } else {
+                    m_dragging = true;
+                    m_dragPos = me->globalPosition().toPoint() - frameGeometry().topLeft();
+                }
+                return false;
+            }
+            if (type == QEvent::MouseMove && m_dragging && (me->buttons() & Qt::LeftButton)) {
+                move(me->globalPosition().toPoint() - m_dragPos);
+                return true;
+            }
+            if (type == QEvent::MouseButtonRelease)
+                m_dragging = false;
+        } else if (type == QEvent::MouseButtonPress) {
+            m_dragging = false;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void RgbPanel::toggleMax()
+{
+    if (m_maximized) {
+        setGeometry(m_normalGeo);
+        m_maximized = false;
+    } else {
+        m_normalGeo = geometry();
+        QScreen *screen = nullptr;
+        for (QScreen *s : qApp->screens())
+            if (s->availableGeometry().contains(geometry().center())) { screen = s; break; }
+        if (!screen) screen = QGuiApplication::primaryScreen();
+        setGeometry(screen->availableGeometry());
+        m_maximized = true;
+    }
+}
+
+void RgbPanel::mousePressEvent(QMouseEvent *ev)
+{
+    if (ev->button() == Qt::LeftButton) {
+        m_dragging = true;
+        m_dragPos = ev->globalPosition().toPoint() - frameGeometry().topLeft();
+    }
+    QWidget::mousePressEvent(ev);
+}
+
+void RgbPanel::mouseMoveEvent(QMouseEvent *ev)
+{
+    if (m_dragging)
+        move(ev->globalPosition().toPoint() - m_dragPos);
+    QWidget::mouseMoveEvent(ev);
+}
+
+void RgbPanel::mouseReleaseEvent(QMouseEvent *ev)
+{
+    m_dragging = false;
+    QWidget::mouseReleaseEvent(ev);
 }
 
 void RgbPanel::showEvent(QShowEvent *ev)

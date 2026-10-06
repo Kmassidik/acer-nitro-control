@@ -49,11 +49,13 @@ private:
     QLabel *m_desc = nullptr;
     Toggle *m_auto = nullptr;
     QLabel *m_alertRow = nullptr;
+    QPushButton *m_closeDot = nullptr, *m_restoreDot = nullptr, *m_rgbDot = nullptr;
 
     QString m_level = "?";
     QString m_pending;
     int m_targetCpuRpm = 0, m_targetGpuRpm = 0;   // real, from nbfc
     int m_uiCpuRpm = 0, m_uiGpuRpm = 0;           // smoothed for display
+    bool m_fansKnown = false;                     // false = nbfc unreachable
     bool m_dragging = false;
     QPoint m_dragPos;
     bool m_maximized = false;

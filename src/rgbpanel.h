@@ -76,6 +76,7 @@ private:
     QLabel *m_brightVal = nullptr, *m_speedVal = nullptr;
     Toggle *m_link = nullptr;
     QLabel *m_status = nullptr;
+    QPushButton *m_closeDot = nullptr, *m_restoreDot = nullptr, *m_popupDot = nullptr;
     std::function<void()> m_openPopup;
     QTimer *m_paintTimer = nullptr;        // live effect animation (only while visible)
     double m_t = 0;

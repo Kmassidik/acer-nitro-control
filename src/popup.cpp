@@ -112,23 +112,28 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *dots = new QHBoxLayout;
     dots->setContentsMargins(0, 0, 0, 0);
     dots->setSpacing(6);
-    auto mkDot = [this](std::function<void()> act) {
+    auto mkDot = [this](std::function<void()> act, const QString &label) {
         auto *d = new QPushButton(this);
         d->setObjectName("dotBtn");
         d->setFixedSize(10, 10);
         d->setCursor(Qt::PointingHandCursor);
+        d->setToolTip(label);
+        d->installEventFilter(this);   // hover grow handled in eventFilter
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    dots->addWidget(mkDot([this] { hide(); }));                 // close dot 1
-    dots->addWidget(mkDot([this] { setGeometry(m_normalGeo); })); // restore dot 2
+    m_closeDot = mkDot([this] { hide(); }, "Close");
+    m_restoreDot = mkDot([this] { setGeometry(m_normalGeo); }, "Restore size");
+    dots->addWidget(m_closeDot);
+    dots->addWidget(m_restoreDot);
     auto *ttl = new QLabel("Nitro AN515-58");
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addSpacing(18);
     dots->addWidget(ttl, 1);
     dots->addSpacing(26);
-    dots->addWidget(mkDot([this] { if (m_openRgb) m_openRgb(); })); // rgb dot
+    m_rgbDot = mkDot([this] { if (m_openRgb) m_openRgb(); }, "Keyboard RGB");
+    dots->addWidget(m_rgbDot);
 
     // ring: readout painted inside TempRing
     m_ring = new TempRing;
@@ -173,9 +178,11 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_seg->setPillColor(QColor(255, 255, 255, 28));
     m_seg->setAccentColor(Qt::white);
     connect(m_seg, &Segmented::selected, this, [this](int idx) {
-        m_pending = QLatin1String(cfg::LEVELS[idx].key);
-        m_desc->setText(QString::fromLatin1(cfg::LEVELS[idx].sub));
-        refresh();
+        // Apply immediately (mock behavior) — turbo-lvl stops the guard for
+        // manual levels, so a click also exits auto. No staged Apply button.
+        const QString key = QLatin1String(cfg::LEVELS[idx].key);
+        m_desc->setText(QString("applying %1…").arg(cfg::LEVELS[idx].title));
+        control::setLevelAsync(key, [this] { refresh(); });
     });
     m_desc = new QLabel(QString::fromLatin1(cfg::LEVELS[1].sub));
     m_desc->setObjectName("status");
@@ -189,15 +196,14 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *r1 = new QLabel("Auto fan control");
     r1->setObjectName("row");
     m_auto = new Toggle;
+    m_auto->setToolTip("Auto = thermal guard daemon (drops to Quiet ≥88 °C,\n"
+                       "recovers ≤80 °C). Clicking a mode switches back to manual.");
     connect(m_auto, &Toggle::toggled, this, [this](bool on) {
-        m_seg->setEnabled(!on);
-        if (on) {
-            m_pending = QStringLiteral("A");
-            m_desc->setText("Dynamic · adapts to temperature.");
-        } else if (m_pending == "A") {
-            m_pending.clear();
-            m_desc->setText(QString::fromLatin1(cfg::LEVELS[m_seg->current()].sub));
-        }
+        m_pending = on ? QStringLiteral("A")
+                       : QLatin1String(cfg::LEVELS[m_seg->current()].key);
+        m_desc->setText(on ? QStringLiteral("applying auto (thermal guard)…")
+                           : QString("applying %1…").arg(
+                                 cfg::LEVELS[m_seg->current()].title));
         applySelection();
     });
     row1->addWidget(r1);
@@ -245,6 +251,8 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_anim = new QTimer(this);
     m_anim->setInterval(70);
     connect(m_anim, &QTimer::timeout, this, [this] {
+        if (!m_fansKnown)
+            return;   // keep the dash; nothing to ease
         const int stepC = qBound(-300, m_targetCpuRpm - m_uiCpuRpm, 300);
         const int stepG = qBound(-300, m_targetGpuRpm - m_uiGpuRpm, 300);
         if (stepC) {
@@ -285,13 +293,21 @@ void Popup::refresh()
     m_ring->setTemp(cpu);
     m_statGpu->setText(QString::number(gpu));
 
+    // nbfc `cur` is % of max duty; steps = nominal max RPM. `tgt` is also %.
+    // cur 0 + tgt 0 = deliberate idle stop (or nbfc not reading) — show the
+    // real spin-down rather than a fake number.
     int cRpm = 0, gRpm = 0;
     if (fans.size() >= 2) {
         cRpm = nominalMaxRpm(fans[0]);
         gRpm = nominalMaxRpm(fans[1]);
+        m_fansKnown = true;
+    } else {
+        m_fansKnown = false;   // nbfc missing → dash, not fake 0
     }
     m_targetCpuRpm = cRpm;
     m_targetGpuRpm = gRpm;
+    m_statFanC->setText(m_fansKnown ? QLocale().toString(cRpm) : "—");
+    m_statFanG->setText(m_fansKnown ? QLocale().toString(gRpm) : "—");
 
     applyLevel(lvl);
 }
@@ -304,20 +320,21 @@ void Popup::applyLevel(const QString &lvl)
         QSignalBlocker b(m_auto);
         m_auto->setChecked(autoOn);
     }
-    m_seg->setEnabled(!autoOn);
-    if (!autoOn) {
+    // Segments stay enabled in auto — clicking one exits auto (turbo-lvl
+    // "1".."4" stops the guard). Pill only moves when a manual level matches.
+    if (!autoOn && m_pending.isEmpty()) {
         for (int i = 0; i < cfg::N_MANUAL; ++i)
             if (lvl == QLatin1String(cfg::LEVELS[i].key)) {
-                m_seg->select(i, false);
+                if (m_seg->current() != i)
+                    m_seg->select(i, false);
                 m_desc->setText(QString::fromLatin1(cfg::LEVELS[i].sub));
                 break;
             }
-    } else {
+    } else if (autoOn && m_pending.isEmpty()) {
         m_desc->setText("Dynamic · adapts to temperature.");
     }
-    if (!m_pending.isEmpty()) {
-        m_desc->setText(QString("applying %1…").arg(m_pending));
-    }
+    if (!m_pending.isEmpty())
+        return;   // desc already shows the "applying…" text set by the click
 }
 
 void Popup::applySelection()
@@ -326,7 +343,14 @@ void Popup::applySelection()
         return;
     const QString applied = m_pending;
     m_pending.clear();
-    m_desc->setText(QString("applying %1…").arg(applied));
+    if (applied == "A")
+        m_desc->setText("applying auto (thermal guard)…");
+    else
+        for (const auto &lv : cfg::LEVELS)
+            if (applied == QLatin1String(lv.key)) {
+                m_desc->setText(QString("applying %1…").arg(lv.title));
+                break;
+            }
     control::setLevelAsync(applied, [this] { refresh(); });
 }
 
@@ -366,6 +390,14 @@ void Popup::toggleMax()
 // shared-drag helpers identical with RGB panel (kept intentionally tiny)
 bool Popup::eventFilter(QObject *watched, QEvent *event)
 {
+    // titlebar dots grow on hover (affordance supplementing the tooltip)
+    auto *btn = qobject_cast<QPushButton *>(watched);
+    if (btn && (btn == m_closeDot || btn == m_restoreDot || btn == m_rgbDot)) {
+        if (event->type() == QEvent::Enter)
+            btn->setFixedSize(12, 12);
+        else if (event->type() == QEvent::Leave)
+            btn->setFixedSize(10, 10);
+    }
     const QEvent::Type type = event->type();
     if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
         type == QEvent::MouseButtonRelease) {

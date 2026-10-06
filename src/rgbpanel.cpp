@@ -127,29 +127,34 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     // titlebar dots
     auto *dots = new QHBoxLayout;
     dots->setSpacing(6);
-    auto mkDot = [this](std::function<void()> act) {
+    auto mkDot = [this](std::function<void()> act, const QString &label) {
         auto *d = new QPushButton(this);
         d->setObjectName("dotBtn");
         d->setFixedSize(10, 10);
         d->setCursor(Qt::PointingHandCursor);
+        d->setToolTip(label);
+        d->installEventFilter(this);   // hover grow handled in eventFilter
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    dots->addWidget(mkDot([this] { hide(); }));
-    dots->addWidget(mkDot([this] {
+    m_closeDot = mkDot([this] { hide(); }, "Close");
+    m_restoreDot = mkDot([this] {
         setGeometry(m_normalGeo);
         m_maximized = false;
-    }));
+    }, "Restore size");
+    dots->addWidget(m_closeDot);
+    dots->addWidget(m_restoreDot);
     dots->addSpacing(18);
     auto *ttl = new QLabel("Keyboard RGB");
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
     dots->addSpacing(26);
-    dots->addWidget(mkDot([this] {
+    m_popupDot = mkDot([this] {
         if (m_openPopup)
             m_openPopup();
-    }));
+    }, "Thermal control");
+    dots->addWidget(m_popupDot);
 
     // keyboard preview
     m_kb = new QWidget;
@@ -461,6 +466,13 @@ void RgbPanel::apply()
 // drag helpers (same strategy as Popup)
 bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
 {
+    auto *btn = qobject_cast<QPushButton *>(watched);
+    if (btn && (btn == m_closeDot || btn == m_restoreDot || btn == m_popupDot)) {
+        if (event->type() == QEvent::Enter)
+            btn->setFixedSize(12, 12);
+        else if (event->type() == QEvent::Leave)
+            btn->setFixedSize(10, 10);
+    }
     const QEvent::Type type = event->type();
     if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
         type == QEvent::MouseButtonRelease) {

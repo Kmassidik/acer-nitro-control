@@ -18,6 +18,7 @@ qt_add_executable(nitro-control
     src/popup.h     src/popup.cpp
     src/rgbpanel.h  src/rgbpanel.cpp
     src/tray.h      src/tray.cpp
+    src/selftest.cpp
 )
 
 target_link_libraries(nitro-control PRIVATE Qt6::Widgets Qt6::Concurrent)

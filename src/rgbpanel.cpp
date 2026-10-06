@@ -174,6 +174,7 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
         m_keys[r].reserve(KB_COLS);
         for (int c = 0; c < KB_COLS; ++c) {
             auto *k = new Keycap(r, c, m_kb);
+            k->setObjectName("keycap");
             k->setZone(int(double(c) / KB_COLS * 4));   // := mock mapping
             connect(k, &Keycap::picked, this, [this](int row, int col) {
                 selectZone(m_keys[row][col]->zone());
@@ -318,6 +319,7 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     auto *rl = new QLabel("Link all zones");
     rl->setObjectName("row");
     m_link = new Toggle;
+    m_link->setProperty("linkToggle", true);
     connect(m_link, &Toggle::toggled, this, [this](bool on) {
         m_state["sync"] = on;
         if (on) {

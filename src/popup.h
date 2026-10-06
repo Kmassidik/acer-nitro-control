@@ -57,6 +57,8 @@ private:
     bool m_programmatic = false;   // suppress slider echoes while syncing UI
     QTimer *m_fanDebounce = nullptr;   // coalesce slider movement before nbfc write
     qint64 m_lastFanWriteMs = 0;   // debounce against 1s refresh re-apply
+    qint64 m_userIntentMs = 0;     // last toggle/segment click — echo suppress window
+    bool m_intentAuto = false;     // what the user last asked auto to be
 
     QString m_level = "?";
     QString m_pending;

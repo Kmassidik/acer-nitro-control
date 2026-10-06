@@ -8,6 +8,7 @@
 #include <QAbstractButton>
 #include <QAbstractSlider>
 #include <QApplication>
+#include <QDateTime>
 #include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -236,8 +237,12 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_auto->setToolTip("Auto = nbfc curve (guard may still cut turbo ≥88 °C).\n"
                        "Manual = your slider duty wins, guard keeps watch.");
     connect(m_auto, &Toggle::toggled, this, [this](bool on) {
+        // OPTIMISTIC UI + intent latch: reflect the user's choice instantly.
+        // refresh() may not correct the toggle for 4 s (async nbfc write +
+        // settle), else the 1 s poll fights the user mid-apply (the bug).
+        m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
+        m_intentAuto = on;
         if (on) {
-            // guard daemon takes fan control — hand manual nbfc duty back
             control::setFansAuto([this] { refresh(); });
             m_pending = QStringLiteral("A");
             m_desc->setText(QStringLiteral("applying auto (thermal guard)…"));
@@ -377,10 +382,12 @@ void Popup::refresh()
 void Popup::applyLevel(const QString &lvl, bool fansAuto)
 {
     m_level = lvl;
-    // Toggle = real nbfc auto state. Guard service being active shows in the
-    // rows below ("Thermal guard" row), not here — manual duty and the guard
-    // can legitimately coexist.
-    if (m_auto->isChecked() != fansAuto) {
+    // Toggle = real nbfc auto state — but NEVER inside the 4 s intent window
+    // after a user click (async write hasn't landed; stale echo would fight
+    // the user and re-revert the toggle: the auto-toggle bug).
+    const qint64 sinceIntent = QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
+    const bool inGrace = sinceIntent < 4000;
+    if (!inGrace && m_auto->isChecked() != fansAuto) {
         QSignalBlocker b(m_auto);
         m_auto->setChecked(fansAuto);
     }

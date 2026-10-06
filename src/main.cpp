@@ -26,6 +26,8 @@ static bool saveShot(QWidget &w, const QString &file)
     return true;
 }
 
+int runSelfTest();   // defined in selftest.cpp
+
 int main(int argc, char **argv)
 {
     // Keep no desktopFileName: with an app id Qt 6.11 registers the tray via
@@ -43,6 +45,14 @@ int main(int argc, char **argv)
                 if (qstrcmp(argv[j], "--state") == 0)
                     path = QString::fromLocal8Bit(argv[j + 1]);
             return control::restoreRgb(path);
+        }
+
+    // offscreen UI selftest (verification)
+    for (int i = 1; i < argc; ++i)
+        if (qstrcmp(argv[i], "--selftest") == 0) {
+            QApplication app(argc, argv);
+            app.setQuitOnLastWindowClosed(false);
+            return runSelfTest();
         }
 
     // offscreen screenshot mode (verification)

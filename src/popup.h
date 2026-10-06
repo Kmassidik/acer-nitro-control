@@ -52,7 +52,6 @@ private:
     QLabel *m_desc = nullptr;
     Toggle *m_auto = nullptr;
     QLabel *m_alertRow = nullptr;
-    QPushButton *m_closeDot = nullptr, *m_restoreDot = nullptr, *m_rgbDot = nullptr;
     QSlider *m_fanAll = nullptr, *m_fanCpu = nullptr, *m_fanGpu = nullptr;
     QLabel *m_fanAllVal = nullptr, *m_fanCpuVal = nullptr, *m_fanGpuVal = nullptr;
     bool m_programmatic = false;   // suppress slider echoes while syncing UI

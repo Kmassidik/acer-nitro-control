@@ -26,8 +26,13 @@ QFrame#panel {
 QLabel#ttl { color: #8b87a3; font-size: 12px; background: transparent; }
 QLabel#ttlc { color: #6f6b8a; font-size: 12px; background: transparent; }
 QLabel#dot { background: rgba(255,255,255,0.13); border-radius: 5px; max-width: 10px; max-height: 10px; }
-QPushButton#dotBtn { background: rgba(255,255,255,0.13); border: none; border-radius: 5px; max-width: 10px; max-height: 10px; padding: 0; }
-QPushButton#dotBtn:hover { background: rgba(255,255,255,0.35); }
+QPushButton#dotBtn { border: none; border-radius: 7px; padding: 0; }
+QPushButton#dotClose { background: #f87171; }
+QPushButton#dotClose:hover { background: #ef4444; }
+QPushButton#dotMax { background: #fbbf24; }
+QPushButton#dotMax:hover { background: #d9970c; }
+QPushButton#dotRgb { background: #a78bfa; }
+QPushButton#dotRgb:hover { background: #8b5cf6; }
 
 QLabel#bigTemp { font-size: 46px; font-weight: 600; letter-spacing: -0.03em; background: transparent; }
 QLabel#ringLbl { font-size: 11px; color: #8b87a3; letter-spacing: 0.12em; background: transparent; }

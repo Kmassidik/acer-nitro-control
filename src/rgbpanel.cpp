@@ -124,37 +124,44 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     lay->setContentsMargins(22, 10, 22, 22);
     lay->setSpacing(6);
 
-    // titlebar dots
+    // titlebar: left traffic-light group + centered title
     auto *dots = new QHBoxLayout;
-    dots->setSpacing(6);
-    auto mkDot = [this](std::function<void()> act, const QString &label) {
+    dots->setSpacing(7);
+    auto mkDot = [this](const char *cls, std::function<void()> act,
+                        const QString &label) {
         auto *d = new QPushButton(this);
-        d->setObjectName("dotBtn");
-        d->setFixedSize(10, 10);
+        d->setObjectName(cls);
+        d->setFixedSize(14, 14);
         d->setCursor(Qt::PointingHandCursor);
         d->setToolTip(label);
-        d->installEventFilter(this);   // hover grow handled in eventFilter
+        d->setAttribute(Qt::WA_LayoutOnEntireRect);
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    m_closeDot = mkDot([this] { hide(); }, "Close");
-    m_restoreDot = mkDot([this] {
-        setGeometry(m_normalGeo);
-        m_maximized = false;
-    }, "Restore size");
-    dots->addWidget(m_closeDot);
-    dots->addWidget(m_restoreDot);
-    dots->addSpacing(18);
+    dots->addWidget(mkDot("dotClose", [this] { hide(); }, "Close"));
+    dots->addWidget(mkDot("dotMax", [this] {
+        if (m_maximized) {
+            setGeometry(m_normalGeo);
+            m_maximized = false;
+        } else {
+            m_normalGeo = geometry();
+            QScreen *screen = QGuiApplication::screenAt(geometry().center());
+            if (!screen)
+                screen = QGuiApplication::primaryScreen();
+            setGeometry(screen->availableGeometry());
+            m_maximized = true;
+        }
+    }, "Maximize / restore"));
+    dots->addWidget(mkDot("dotRgb", [this] {
+        if (m_openPopup)
+            m_openPopup();
+    }, "Thermal control"));
+    dots->addSpacing(10);
     auto *ttl = new QLabel("Keyboard RGB");
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
-    dots->addSpacing(26);
-    m_popupDot = mkDot([this] {
-        if (m_openPopup)
-            m_openPopup();
-    }, "Thermal control");
-    dots->addWidget(m_popupDot);
+    dots->addSpacing(52);
 
     // keyboard preview
     m_kb = new QWidget;
@@ -466,13 +473,6 @@ void RgbPanel::apply()
 // drag helpers (same strategy as Popup)
 bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
 {
-    auto *btn = qobject_cast<QPushButton *>(watched);
-    if (btn && (btn == m_closeDot || btn == m_restoreDot || btn == m_popupDot)) {
-        if (event->type() == QEvent::Enter)
-            btn->setFixedSize(12, 12);
-        else if (event->type() == QEvent::Leave)
-            btn->setFixedSize(10, 10);
-    }
     const QEvent::Type type = event->type();
     if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
         type == QEvent::MouseButtonRelease) {

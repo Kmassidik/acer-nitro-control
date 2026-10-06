@@ -109,32 +109,33 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     lay->setContentsMargins(22, 10, 22, 22);
     lay->setSpacing(6);
 
-    // titlebar: functional dots + centered title
+    // titlebar: left traffic-light group (close red / max amber / rgb violet)
+    // + centered title + trailing spacer
     auto *dots = new QHBoxLayout;
     dots->setContentsMargins(0, 0, 0, 0);
-    dots->setSpacing(6);
-    auto mkDot = [this](std::function<void()> act, const QString &label) {
+    dots->setSpacing(7);
+    auto mkDot = [this](const char *cls, std::function<void()> act,
+                        const QString &label) {
         auto *d = new QPushButton(this);
-        d->setObjectName("dotBtn");
-        d->setFixedSize(10, 10);
+        d->setObjectName(cls);
+        d->setFixedSize(14, 14);
         d->setCursor(Qt::PointingHandCursor);
         d->setToolTip(label);
-        d->installEventFilter(this);   // hover grow handled in eventFilter
+        d->setAttribute(Qt::WA_LayoutOnEntireRect);   // click area == visual
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    m_closeDot = mkDot([this] { hide(); }, "Close");
-    m_restoreDot = mkDot([this] { setGeometry(m_normalGeo); }, "Restore size");
-    dots->addWidget(m_closeDot);
-    dots->addWidget(m_restoreDot);
+    dots->addWidget(mkDot("dotClose", [this] { hide(); }, "Close"));
+    dots->addWidget(mkDot("dotMax", [this] { toggleMax(); },
+                          "Maximize / restore"));
+    dots->addWidget(mkDot("dotRgb", [this] { if (m_openRgb) m_openRgb(); },
+                          "Keyboard RGB"));
+    dots->addSpacing(10);
     auto *ttl = new QLabel("Nitro AN515-58");
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
-    dots->addSpacing(18);
     dots->addWidget(ttl, 1);
-    dots->addSpacing(26);
-    m_rgbDot = mkDot([this] { if (m_openRgb) m_openRgb(); }, "Keyboard RGB");
-    dots->addWidget(m_rgbDot);
+    dots->addSpacing(52);   // counterweights the 42px button group + spacing
 
     // ring: readout painted inside TempRing
     m_ring = new TempRing;
@@ -481,14 +482,6 @@ void Popup::toggleMax()
 // shared-drag helpers identical with RGB panel (kept intentionally tiny)
 bool Popup::eventFilter(QObject *watched, QEvent *event)
 {
-    // titlebar dots grow on hover (affordance supplementing the tooltip)
-    auto *btn = qobject_cast<QPushButton *>(watched);
-    if (btn && (btn == m_closeDot || btn == m_restoreDot || btn == m_rgbDot)) {
-        if (event->type() == QEvent::Enter)
-            btn->setFixedSize(12, 12);
-        else if (event->type() == QEvent::Leave)
-            btn->setFixedSize(10, 10);
-    }
     const QEvent::Type type = event->type();
     if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
         type == QEvent::MouseButtonRelease) {

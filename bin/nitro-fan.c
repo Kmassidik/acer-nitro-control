@@ -59,7 +59,10 @@ int main(int argc, char **argv)
                 isAuto = v;
             fclose(f);
         }
-        printf("%u %u %d\n", cw, gw, isAuto);
+        FILE *sf = fopen("/var/lib/nitro-control/fanduty", "r");
+        int cmd = -9;
+        if (sf) { if (fscanf(sf, "%d", &cmd) != 1) cmd = -9; fclose(sf); }
+        printf("%u %u %d %d\n", cw, gw, isAuto, cmd);
         return 0;
     }
     if (strcmp(argv[1], "auto") == 0) {
@@ -68,6 +71,8 @@ int main(int argc, char **argv)
         ecwr(0x33, 0x10);   // GPU fan → auto
         FILE *f = fopen("/var/lib/nitro-control/fanmode", "w");
         if (f) { fprintf(f, "1"); fclose(f); }
+        f = fopen("/var/lib/nitro-control/fanduty", "w");
+        if (f) { fprintf(f, "-1"); fclose(f); }
         printf("fan: auto (EC curve)\n");
         return 0;
     }
@@ -82,6 +87,8 @@ int main(int argc, char **argv)
     ecwr(0x3A, p);          // GPU duty
     FILE *f = fopen("/var/lib/nitro-control/fanmode", "w");
     if (f) { fprintf(f, "0"); fclose(f); }
+    f = fopen("/var/lib/nitro-control/fanduty", "w");
+    if (f) { fprintf(f, "%d", pct); fclose(f); }
     printf("fan: %d%%\n", pct);
     return 0;
 }

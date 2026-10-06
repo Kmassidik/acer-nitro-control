@@ -388,12 +388,20 @@ void Popup::refresh()
         //   both == 0          → mirror 0 (deliberate idle, fans parked)
         // Never echo while the user is dragging, and never inside the
         // 4 s intent window (fresh write may not be reflected yet).
-        const int tgtC = int(qBound(0.0, fans[0].tgt, 100.0));
-        const int tgtG = int(qBound(0.0, fans[1].tgt, 100.0));
         const int curC = int(qBound(0.0, fans[0].cur, 100.0));
         const int curG = int(qBound(0.0, fans[1].cur, 100.0));
-        int showC = tgtC > 0 ? tgtC : curC;
-        int showG = tgtG > 0 ? tgtG : curG;
+        // Echo the COMMANDED duty (state file) — not the banked-register
+        // readback which cycles 0x00/0x0C/0x30/0x51 and made dragged sliders
+        // snap back to ~21% (the tach) right after releasing at 0/100.
+        // In manual: commanded value IS the truth. In auto: show the tach.
+        int showC, showG;
+        if (fans[0].cmdDuty >= 0 && !fans[0].autoCtl) {
+            showC = fans[0].cmdDuty;                    // manual: commanded
+            showG = fans[1].cmdDuty >= 0 ? fans[1].cmdDuty : curG;
+        } else {
+            showC = curC;                               // auto: live tach
+            showG = curG;
+        }
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;

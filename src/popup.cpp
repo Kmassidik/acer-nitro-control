@@ -232,8 +232,8 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *r1 = new QLabel("Auto fan control");
     r1->setObjectName("row");
     m_auto = new Toggle;
-    m_auto->setToolTip("Auto = thermal guard daemon (drops to Quiet ≥88 °C,\n"
-                       "recovers ≤80 °C). Clicking a mode switches back to manual.");
+    m_auto->setToolTip("Auto = nbfc curve (guard may still cut turbo ≥88 °C).\n"
+                       "Manual = your slider duty wins, guard keeps watch.");
     connect(m_auto, &Toggle::toggled, this, [this](bool on) {
         if (on) {
             // guard daemon takes fan control — hand manual nbfc duty back
@@ -338,11 +338,16 @@ void Popup::refresh()
     m_statGpu->setText(QString::number(gpu));
 
     // nbfc `cur` is % of max duty; steps = nominal max RPM. `tgt` is also %.
+    // autoCtl = real "Auto Control Enabled" from nbfc — the toggle reflects
+    // THIS, not the guard unit (slider writes flip nbfc to manual even while
+    // the guard service is running).
+    bool nbfcAuto = false;
     int cRpm = 0, gRpm = 0;
     if (fans.size() >= 2) {
         cRpm = nominalMaxRpm(fans[0]);
         gRpm = nominalMaxRpm(fans[1]);
         m_fansKnown = true;
+        nbfcAuto = fans[0].autoCtl && fans[1].autoCtl;
         // reflect real duty back into the sliders (echo guard suppresses
         // writes; sliders show truth even after manual set)
         const int cpuPct = int(qBound(0.0, fans[0].cur, 100.0));
@@ -365,32 +370,36 @@ void Popup::refresh()
     m_statFanC->setText(m_fansKnown ? QLocale().toString(cRpm) : "—");
     m_statFanG->setText(m_fansKnown ? QLocale().toString(gRpm) : "—");
 
-    applyLevel(lvl);
+    applyLevel(lvl, m_fansKnown ? nbfcAuto : true);
 }
 
-void Popup::applyLevel(const QString &lvl)
+void Popup::applyLevel(const QString &lvl, bool fansAuto)
 {
     m_level = lvl;
-    const bool autoOn = (lvl == "A");
-    if (m_auto->isChecked() != autoOn) {
+    // Toggle = real nbfc auto state. Guard service being active shows in the
+    // rows below ("Thermal guard" row), not here — manual duty and the guard
+    // can legitimately coexist.
+    if (m_auto->isChecked() != fansAuto) {
         QSignalBlocker b(m_auto);
-        m_auto->setChecked(autoOn);
+        m_auto->setChecked(fansAuto);
     }
-    // Segments stay enabled in auto — clicking one exits auto (turbo-lvl
-    // "1".."4" stops the guard). Pill only moves when a manual level matches.
-    if (!autoOn && m_pending.isEmpty()) {
+    // Segments stay enabled always — clicking one exits nbfc-auto and applies
+    // that level. Pill only moves when a manual level matches.
+    if (m_pending.isEmpty()) {
+        bool known = false;
         for (int i = 0; i < cfg::N_MANUAL; ++i)
             if (lvl == QLatin1String(cfg::LEVELS[i].key)) {
                 if (m_seg->current() != i)
                     m_seg->select(i, false);
                 m_desc->setText(QString::fromLatin1(cfg::LEVELS[i].sub));
+                known = true;
                 break;
             }
-    } else if (autoOn && m_pending.isEmpty()) {
-        m_desc->setText("Dynamic · adapts to temperature.");
+        if (!known && !fansAuto)
+            m_desc->setText("manual");   // level unreadable but fans pinned
+        else if (!known && fansAuto)
+            m_desc->setText("Dynamic · adapts to temperature.");
     }
-    if (!m_pending.isEmpty())
-        return;   // desc already shows the "applying…" text set by the click
 }
 
 void Popup::applySelection()

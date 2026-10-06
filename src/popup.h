@@ -34,7 +34,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *ev) override;
 
 private:
-    void applyLevel(const QString &lvl);
+    void applyLevel(const QString &lvl, bool fansAuto);
     void applySelection();
     void applyFans();
     void scheduleFanWrite();

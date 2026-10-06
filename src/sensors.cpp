@@ -53,14 +53,17 @@ QVector<Fan> readFans()
     static const QRegularExpression re(
         "Fan Display Name\\s*:\\s*([^\\n]+)\\s+Temperature\\s*:\\s*([\\d.]+)"
         ".*?Current Fan Speed\\s*:\\s*([\\d.]+)\\s+Target Fan Speed\\s*:\\s*([\\d.]+)"
-        "\\s+Fan Speed Steps\\s*:\\s*(\\d+)",
+        "\\s+Fan Speed Steps\\s*:\\s*(\\d+)"
+        "(?:.*?Auto Control Enabled\\s*:\\s*(\\w+))?",
         QRegularExpression::DotMatchesEverythingOption);
     auto it = re.globalMatch(out);
     while (it.hasNext()) {
         const auto m = it.next();
+        const QString autoCtl = m.captured(6);
         fans.append({m.captured(1).trimmed(), m.captured(2).toDouble(),
                      m.captured(3).toDouble(), m.captured(4).toDouble(),
-                     m.captured(5).toDouble()});
+                     m.captured(5).toDouble(),
+                     autoCtl.compare(QLatin1String("true"), Qt::CaseInsensitive) == 0});
     }
     return fans;
 }

@@ -259,9 +259,15 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
             return;
         }
         // leaving auto: stage the current SAVED duties in the sliders, but
-        // do NOT write — the Apply button is the commit point (deterministic;
-        // toggle-off writing eased tach values was the ghost-pair bug)
+        // do NOT write — the Apply button is the commit point. Tell the user
+        // what is live vs staged, so "Apply?" is never a guess.
         m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
+        const auto fans = sensors::readFans();
+        const int c = fans.size() >= 1 ? fans[0].cmdDuty : -1;
+        const int g2 = fans.size() >= 2 ? fans[1].cmdDuty : -1;
+        m_desc->setText(QString("staged: CPU %1% / GPU %2% — Apply to write")
+                            .arg(c >= 0 ? c : 0)
+                            .arg(g2 >= 0 ? g2 : 0));
     });
     row1->addWidget(r1);
     row1->addStretch();

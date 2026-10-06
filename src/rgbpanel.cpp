@@ -124,14 +124,13 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     lay->setContentsMargins(22, 10, 22, 22);
     lay->setSpacing(6);
 
-    // titlebar: left traffic-light group + centered title + hover hint
+    // titlebar: utility buttons (Option 2) + centered title
     auto *dots = new QHBoxLayout;
     dots->setSpacing(7);
-    auto mkDot = [this](const char *cls, std::function<void()> act,
-                        const QString &label) {
+    auto mkBtn = [this](std::function<void()> act, const QString &label) {
         auto *d = new QPushButton(this);
-        d->setObjectName(cls);
-        d->setFixedSize(14, 14);
+        d->setObjectName("utilBtn");
+        d->setFixedHeight(24);
         d->setCursor(Qt::PointingHandCursor);
         d->setToolTip(label);
         d->setAttribute(Qt::WA_LayoutOnEntireRect);
@@ -140,24 +139,12 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    dots->addWidget(mkDot("dotClose", [this] { hide(); }, "Close"));
-    dots->addWidget(mkDot("dotMax", [this] {
-        if (m_maximized) {
-            setGeometry(m_normalGeo);
-            m_maximized = false;
-        } else {
-            m_normalGeo = geometry();
-            QScreen *screen = QGuiApplication::screenAt(geometry().center());
-            if (!screen)
-                screen = QGuiApplication::primaryScreen();
-            setGeometry(screen->availableGeometry());
-            m_maximized = true;
-        }
-    }, "Maximize / restore"));
-    dots->addWidget(mkDot("dotRgb", [this] {
+    auto *fanBtn = mkBtn([this] {
         if (m_openPopup)
             m_openPopup();
-    }, "Thermal control"));
+    }, "Fan panel");
+    fanBtn->setText("Fan");
+    dots->addWidget(fanBtn);
     dots->addSpacing(10);
     m_baseTitle = QStringLiteral("Keyboard RGB");
     auto *ttl = new QLabel(m_baseTitle);

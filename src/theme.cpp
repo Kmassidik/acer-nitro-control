@@ -26,14 +26,24 @@ QFrame#panel {
 QLabel#ttl { color: #8b87a3; font-size: 12px; background: transparent; }
 QLabel#ttlc { color: #6f6b8a; font-size: 12px; background: transparent; }
 QLabel#dot { background: rgba(255,255,255,0.13); border-radius: 5px; max-width: 10px; max-height: 10px; }
-QPushButton#dotBtn { border: none; border-radius: 7px; padding: 0; }
+QPushButton#dotClose, QPushButton#dotMin, QPushButton#dotMax, QPushButton#dotRgb {
+  border: none; border-radius: 7px; padding: 0; font-size: 9px; font-weight: bold;
+  color: transparent;   /* glyph appears on hover, macOS style */
+}
 QPushButton#dotClose { background: #f87171; }
-QPushButton#dotClose:hover { background: #ef4444; }
-QPushButton#dotMax { background: #fbbf24; }
-QPushButton#dotMax:hover { background: #d9970c; }
-QPushButton#dotRgb { background: #a78bfa; }
-QPushButton#dotRgb:hover { background: #8b5cf6; }
+QPushButton#dotClose:hover { background: #ef4444; color: rgba(0,0,0,0.55); }
+QPushButton#dotMin { background: #fbbf24; }
+QPushButton#dotMin:hover { background: #d9970c; color: rgba(0,0,0,0.55); }
+QPushButton#dotMax { background: #34d399; }
+QPushButton#dotMax:hover { background: #10b981; color: rgba(0,0,0,0.55); }
+QPushButton#dotRgb { background: transparent; border: none; border-radius: 6px; padding: 0; font-size: 13px; color: #6f6b8a; }
+QPushButton#dotRgb:hover { color: #a78bfa; }
 
+QPushButton#utilBtn {
+  background: rgba(255,255,255,0.07); border: none; border-radius: 12px;
+  padding: 2px 12px; color: #cfcce6; font-size: 12px;
+}
+QPushButton#utilBtn:hover { background: rgba(255,255,255,0.14); color: #ffffff; }
 QLabel#bigTemp { font-size: 46px; font-weight: 600; letter-spacing: -0.03em; background: transparent; }
 QLabel#ringLbl { font-size: 11px; color: #8b87a3; letter-spacing: 0.12em; background: transparent; }
 QLabel#statLbl { font-size: 11px; color: #8b87a3; background: transparent; }

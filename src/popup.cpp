@@ -110,36 +110,37 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     lay->setContentsMargins(22, 10, 22, 22);
     lay->setSpacing(6);
 
-    // titlebar: left traffic-light group (close red / max amber / rgb violet)
-    // + centered title + trailing spacer
+    // titlebar: two honest utility buttons (Option 2) + centered title.
+    // No window-manager mimicry — row toggles visibility between panels.
     auto *dots = new QHBoxLayout;
     dots->setContentsMargins(0, 0, 0, 0);
     dots->setSpacing(7);
-    auto mkDot = [this](const char *cls, std::function<void()> act,
+    auto mkBtn = [this](const char *cls, std::function<void()> act,
                         const QString &label) {
         auto *d = new QPushButton(this);
         d->setObjectName(cls);
-        d->setFixedSize(14, 14);
+        d->setFixedHeight(24);
         d->setCursor(Qt::PointingHandCursor);
         d->setToolTip(label);
-        d->setAttribute(Qt::WA_LayoutOnEntireRect);   // click area == visual
-        d->installEventFilter(this);                  // hint label on hover
+        d->setAttribute(Qt::WA_LayoutOnEntireRect);
+        d->installEventFilter(this);
         m_dotHints[d] = label;
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
-    dots->addWidget(mkDot("dotClose", [this] { hide(); }, "Close"));
-    dots->addWidget(mkDot("dotMax", [this] { toggleMax(); },
-                          "Maximize / restore"));
-    dots->addWidget(mkDot("dotRgb", [this] { if (m_openRgb) m_openRgb(); },
-                          "Keyboard RGB"));
+    // RGB switch button only — the popup IS the fan panel
+    m_rgbBtn = mkBtn("utilBtn", {}, "RGB panel");
+    m_rgbBtn->setText("RGB");
+    connect(m_rgbBtn, &QPushButton::clicked, this,
+            [this] { if (m_openRgb) m_openRgb(); });
+    dots->addWidget(m_rgbBtn);
     dots->addSpacing(10);
     m_baseTitle = QStringLiteral("Nitro AN515-58");
     auto *ttl = new QLabel(m_baseTitle);
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
-    dots->addSpacing(12);   // counterweights the 42px button group + spacing
+    dots->addSpacing(12);
     m_title = ttl;
 
     // ring: readout painted inside TempRing

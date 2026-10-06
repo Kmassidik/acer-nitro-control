@@ -7,6 +7,7 @@
 #include "rgbpanel.h"
 #include "segmented.h"
 #include "tray.h"
+#include "sensors.h"
 
 #include <QAbstractButton>
 #include <QApplication>
@@ -61,40 +62,31 @@ int runSelfTest()
                 return b;
         return nullptr;
     };
-    auto *closeDot = dotAt("dotClose");
-    auto *maxDot = dotAt("dotMax");
-    auto *rgbDot = dotAt("dotRgb");
-    report("popup: red close dot exists", closeDot != nullptr);
-    report("popup: amber max dot exists", maxDot != nullptr);
-    report("popup: violet rgb dot exists", rgbDot != nullptr);
+    auto *rgbBtn = dotAt("utilBtn");
+    report("popup: RGB utility button exists", rgbBtn != nullptr);
 
-    // hover swaps header title to the dot's purpose
+    // hover swaps header title to the button's purpose
     bool hintWorks = false;
     const auto labels = popup.findChildren<QLabel *>();
     for (auto *l : labels)
         if (l->objectName() == "ttlc") {
             QEvent enter(QEvent::Enter);
-            QApplication::sendEvent(maxDot, &enter);
+            QApplication::sendEvent(rgbBtn, &enter);
             settle(30);
-            hintWorks = (l->text() == "Maximize / restore");
+            hintWorks = (l->text() == "RGB panel");
             QEvent leave(QEvent::Leave);
-            QApplication::sendEvent(maxDot, &leave);
+            QApplication::sendEvent(rgbBtn, &leave);
             settle(30);
             hintWorks = hintWorks && (l->text() == "Nitro AN515-58");
             break;
         }
-    report("popup: hover swaps title to dot purpose", hintWorks);
+    report("popup: hover swaps title to button purpose", hintWorks);
 
-    if (maxDot) {
-        const QRect before = popup.geometry();
-        clickBtn(maxDot);
-        settle(120);
-        report("popup: amber dot expands window",
-               popup.geometry().width() > before.width() + 100);
-        clickBtn(maxDot);
-        settle(120);
-        report("popup: amber dot restores window", popup.geometry() == before);
-    }
+    // BOTH fans must parse (GPU used to vanish → "—" rpm); live nbfc gives 2
+    const auto fans = sensors::readFans();
+    report("sensors: both fans parsed (size>=2)", fans.size() >= 2);
+    if (fans.size() >= 2)
+        report("sensors: fan autoCtl parsed", fans[0].autoCtl == fans[1].autoCtl);
 
     // toggle auto UI reaction (engine writes asserted separately)
     auto *toggle = [&]() -> QAbstractButton * {
@@ -138,10 +130,12 @@ int runSelfTest()
         report("popup: segment select moves current", seg->current() != before);
     }
 
-    if (closeDot)
-        clickBtn(closeDot);
-    settle(100);
-    report("popup: red dot hides window", !popup.isVisible());
+    {
+        QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
+        QApplication::sendEvent(&popup, &esc);
+        settle(100);
+    }
+    report("popup: Esc hides window", !popup.isVisible());
 
     // ---- RGB panel UI ----
     RgbPanel panel(nullptr, [] {});

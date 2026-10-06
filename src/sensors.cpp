@@ -49,22 +49,46 @@ QVector<Fan> readFans()
     p.start("nbfc", {"status"});
     if (!p.waitForFinished(3000))
         return fans;
-    const QString out = QString::fromUtf8(p.readAllStandardOutput());
-    static const QRegularExpression re(
-        "Fan Display Name\\s*:\\s*([^\\n]+)\\s+Temperature\\s*:\\s*([\\d.]+)"
-        ".*?Current Fan Speed\\s*:\\s*([\\d.]+)\\s+Target Fan Speed\\s*:\\s*([\\d.]+)"
-        "\\s+Fan Speed Steps\\s*:\\s*(\\d+)"
-        "(?:.*?Auto Control Enabled\\s*:\\s*(\\w+))?",
-        QRegularExpression::DotMatchesEverythingOption);
-    auto it = re.globalMatch(out);
-    while (it.hasNext()) {
-        const auto m = it.next();
-        const QString autoCtl = m.captured(6);
-        fans.append({m.captured(1).trimmed(), m.captured(2).toDouble(),
-                     m.captured(3).toDouble(), m.captured(4).toDouble(),
-                     m.captured(5).toDouble(),
-                     autoCtl.compare(QLatin1String("true"), Qt::CaseInsensitive) == 0});
+    // Line-based parse — one giant lazy regex can't handle repeated blocks
+    // (backtracking swallows the GPU fan into match #1 → size()==1 → "—").
+    Fan cur;
+    bool inFan = false;
+    const auto lines = QString::fromUtf8(p.readAllStandardOutput())
+                           .split('\n', Qt::SkipEmptyParts);
+    auto val = [](const QString &l, const char *key) -> QString {
+        const qsizetype k = l.indexOf(key);
+        if (k < 0)
+            return {};
+        return QStringView(l).mid(k + qstrlen(key)).toString()
+                   .mid(l.indexOf(':', k) + 1)
+                   .trimmed();
+    };
+    for (const QString &line : lines) {
+        if (line.startsWith("Fan Display Name")) {
+            if (inFan)
+                fans.append(cur);
+            cur = Fan{};
+            cur.name = val(line, "Fan Display Name");
+            inFan = true;
+            continue;
+        }
+        if (!inFan)
+            continue;
+        if (line.startsWith("Temperature"))
+            cur.temp = val(line, "Temperature").toDouble();
+        else if (line.startsWith("Current Fan Speed"))
+            cur.cur = val(line, "Current Fan Speed").toDouble();
+        else if (line.startsWith("Target Fan Speed"))
+            cur.tgt = val(line, "Target Fan Speed").toDouble();
+        else if (line.startsWith("Fan Speed Steps"))
+            cur.steps = val(line, "Fan Speed Steps").toDouble();
+        else if (line.startsWith("Auto Control Enabled"))
+            cur.autoCtl = val(line, "Auto Control Enabled")
+                              .compare(QLatin1String("true"),
+                                       Qt::CaseInsensitive) == 0;
     }
+    if (inFan)
+        fans.append(cur);
     return fans;
 }
 

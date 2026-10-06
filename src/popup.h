@@ -56,6 +56,7 @@ private:
     QLabel *m_title = nullptr;                       // header text swaps on dot hover
     QString m_baseTitle;
     QHash<QPushButton *, QString> m_dotHints;
+    QPushButton *m_rgbBtn = nullptr;                 // Option-2 utility btn
     QSlider *m_fanAll = nullptr, *m_fanCpu = nullptr, *m_fanGpu = nullptr;
     QLabel *m_fanAllVal = nullptr, *m_fanCpuVal = nullptr, *m_fanGpuVal = nullptr;
     bool m_programmatic = false;   // suppress slider echoes while syncing UI

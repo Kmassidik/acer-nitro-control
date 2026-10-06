@@ -69,6 +69,14 @@ int runSelfTest()
     report("popup: RGB utility button exists", rgbBtn != nullptr);
     auto *closeBtn = dotAt("closeBtn");
     report("popup: close button exists", closeBtn != nullptr);
+    // fan apply button (explicit manual commit)
+    auto *fanApply = [&]() -> QPushButton * {
+        for (auto *b : popup.findChildren<QPushButton *>())
+            if (b->objectName() == "applyBtn")
+                return b;
+        return nullptr;
+    }();
+    report("popup: fan Apply button exists", fanApply != nullptr);
     if (rgbBtn) {
         // THE CRASH PATH: clicking RGB with an empty std::function slot
         // used to throw std::bad_function_call → SIGABRT. Must survive.

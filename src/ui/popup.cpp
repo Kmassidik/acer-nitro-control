@@ -228,17 +228,11 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *allRow = fanRow("All", m_fanAll, m_fanAllVal);
     auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal);
     auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal);
-    connect(m_fanAll, &QSlider::sliderReleased, this, [this] {
-        // All = set both fans to one value, once
-        const int v = m_fanAll->value();
-        control::setFanPct(v, -1, [this] { refresh(); });
-    });
-    connect(m_fanCpu, &QSlider::sliderReleased, this, [this] {
-        control::setFanPct(m_fanCpu->value(), 0, [this] { refresh(); });
-    });
-    connect(m_fanGpu, &QSlider::sliderReleased, this, [this] {
-        control::setFanPct(m_fanGpu->value(), 1, [this] { refresh(); });
-    });
+    connect(m_fanAll, &QSlider::valueChanged, this,
+            [this](int) { /* All mirrors label only; commits via Apply */ });
+    // Manual commits happen on the APPLY button (bottom of the fan section):
+    // release-time writes raced the EC spin-down and looked like values
+    // snapping back; an explicit Apply gives deterministic feedback.
 
     auto *hline = new QFrame(this);
     hline->setObjectName("hline");
@@ -300,6 +294,25 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     lay->addWidget(allRow);
     lay->addWidget(cpuRow);
     lay->addWidget(gpuRow);
+    // explicit commit for manual duty (deterministic vs EC spin-down lag)
+    auto *fanApply = new QPushButton("Apply fan speeds");
+    fanApply->setObjectName("applyBtn");
+    fanApply->setCursor(Qt::PointingHandCursor);
+    connect(fanApply, &QPushButton::clicked, this, [this] {
+        const int c = m_fanCpu->value(), g = m_fanGpu->value();
+        if (c == g && !m_fanAllVal->text().contains('%')) {
+            // fans previously diverged: commit both individually
+            control::setFanPct(c, 0, [this] { refresh(); });
+            control::setFanPct(g, 1, [this] { refresh(); });
+        } else if (c == g) {
+            control::setFanPct(c, -1, [this] { refresh(); });   // both at once
+        } else {
+            control::setFanPct(c, 0, [this] { refresh(); });
+            control::setFanPct(g, 1, [this] { refresh(); });
+        }
+        m_desc->setText(QString("fans: %1% / %2%").arg(c).arg(g));
+    });
+    lay->addWidget(fanApply);
     lay->addWidget(hline);
     lay->addWidget(row1w);
     lay->addWidget(row2w);

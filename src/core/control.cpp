@@ -76,21 +76,32 @@ void setLevelAsync(const QString &key, std::function<void()> instrument)
 // sudoers authorizes exactly:  nitro-priv fan <pct>   |  nitro-priv fan auto
 // EC protocol lives in nitro-priv (unlock 0x03=0x51, manual 0x34/0x33,
 // duty bytes 0x37/0x3A) — protocol validated against nbfc's /dev/port trace.
-static void runPrivFan(const QString &arg)
+static void runPrivFan(const QStringList &args)
 {
     QProcess p;
-    p.start(QStringLiteral("sudo"), {QStringLiteral("-n"),
-                                    QStringLiteral("/usr/local/bin/nitro-priv"),
-                                    QStringLiteral("fan"), arg});
+    QStringList full{QStringLiteral("-n"),
+                    QStringLiteral("/usr/local/bin/nitro-priv"),
+                    QStringLiteral("fan")};
+    full += args;
+    p.start(QStringLiteral("sudo"), full);
     p.waitForFinished(-1);
 }
 
 void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
 {
-    (void)fanIndex;   // both fans move together on this EC (single duty set)
-    const QString p = QString::number(qBound(0, pct, 100));
-    auto run = [p, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        runPrivFan(p);
+    // fanIndex: -1 = both, 0 = CPU only, 1 = GPU only (independent sliders —
+    // nitro-priv routes to nitro-fan cpu|gpu <pct>, helper writes only that
+    // fan's mode+duty registers)
+    const int p = qBound(0, pct, 100);
+    QStringList args;
+    if (fanIndex == 0)
+        args << QStringLiteral("cpu") << QString::number(p);
+    else if (fanIndex == 1)
+        args << QStringLiteral("gpu") << QString::number(p);
+    else
+        args << QString::number(p);
+    auto run = [args, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
+        runPrivFan(args);
         if (ctx)
             QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
                                       Qt::QueuedConnection);
@@ -101,7 +112,7 @@ void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
 void setFansAuto(std::function<void()> instrument)
 {
     auto run = [cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        runPrivFan(QStringLiteral("auto"));
+        runPrivFan({QStringLiteral("auto")});
         if (ctx)
             QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
                                       Qt::QueuedConnection);

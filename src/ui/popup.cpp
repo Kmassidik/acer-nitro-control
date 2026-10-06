@@ -201,7 +201,9 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_desc = new QLabel(QString::fromLatin1(cfg::LEVELS[1].sub));
     m_desc->setObjectName("status");
 
-    // fan control rows (DAM-style: manual % per fan; auto toggle re-delegates)
+    // fan control rows — CPU and GPU are INDEPENDENT; "All" sets both once
+    // (no reverse-sync: moving CPU later never moves GPU/All — the mirrored
+    // relay is what dragged every slider with a single-fan change).
     auto fanRow = [this](const char *name, QSlider *&s, QLabel *&val) {
         s = new QSlider(Qt::Horizontal);
         s->setRange(0, 100);
@@ -226,27 +228,16 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *allRow = fanRow("All", m_fanAll, m_fanAllVal);
     auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal);
     auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal);
-    // ONE commit rendezvous, written ONCE per physical release of the slider
-    // the user actually touched. Propagation to sibling sliders is silent
-    // (their release-hooks are blockable, so a relayed setValue never
-    // re-commits — the ping-pong chain that pinned manual every 2 s).
-    auto commit = [this](QSlider *src, QSlider *a, QSlider *b2) {
-        const int v = src->value();
-        m_programmatic = true;
-        a->setValue(v);
-        b2->setValue(v);
-        m_programmatic = false;
-        applyFans();
-    };
-    // wire the single commit to the one slider RELEASED physically:
-    connect(m_fanAll, &QSlider::sliderReleased, this, [this, commit, allRow] (void){
-        commit(m_fanAll, m_fanCpu, m_fanGpu);
+    connect(m_fanAll, &QSlider::sliderReleased, this, [this] {
+        // All = set both fans to one value, once
+        const int v = m_fanAll->value();
+        control::setFanPct(v, -1, [this] { refresh(); });
     });
-    connect(m_fanCpu, &QSlider::sliderReleased, this, [this, commit] {
-        commit(m_fanCpu, m_fanAll, m_fanGpu);
+    connect(m_fanCpu, &QSlider::sliderReleased, this, [this] {
+        control::setFanPct(m_fanCpu->value(), 0, [this] { refresh(); });
     });
-    connect(m_fanGpu, &QSlider::sliderReleased, this, [this, commit] {
-        commit(m_fanGpu, m_fanAll, m_fanCpu);
+    connect(m_fanGpu, &QSlider::sliderReleased, this, [this] {
+        control::setFanPct(m_fanGpu->value(), 1, [this] { refresh(); });
     });
 
     auto *hline = new QFrame(this);
@@ -390,18 +381,14 @@ void Popup::refresh()
         // 4 s intent window (fresh write may not be reflected yet).
         const int curC = int(qBound(0.0, fans[0].cur, 100.0));
         const int curG = int(qBound(0.0, fans[1].cur, 100.0));
-        // Echo the COMMANDED duty (state file) — not the banked-register
-        // readback which cycles 0x00/0x0C/0x30/0x51 and made dragged sliders
-        // snap back to ~21% (the tach) right after releasing at 0/100.
-        // In manual: commanded value IS the truth. In auto: show the tach.
-        int showC, showG;
-        if (fans[0].cmdDuty >= 0 && !fans[0].autoCtl) {
-            showC = fans[0].cmdDuty;                    // manual: commanded
-            showG = fans[1].cmdDuty >= 0 ? fans[1].cmdDuty : curG;
-        } else {
-            showC = curC;                               // auto: live tach
-            showG = curG;
-        }
+        // Echo the COMMANDED per-fan duty (state files) — not the
+        // banked-register readback which cycles 0x00/0x0C/0x30/0x51 and made
+        // dragged sliders snap back to ~21% (the tach) after a 0/100 release.
+        // Manual fan: commanded value IS the truth for THAT fan. Auto: tach.
+        const bool manualC = !fans[0].autoCtl && fans[0].cmdDuty >= 0;
+        const bool manualG = !fans[1].autoCtl && fans[1].cmdDuty >= 0;
+        int showC = manualC ? fans[0].cmdDuty : curC;
+        int showG = manualG ? fans[1].cmdDuty : curG;
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;
@@ -412,9 +399,9 @@ void Popup::refresh()
             m_fanGpu->setValue(showG);
         m_fanCpuVal->setText(QString("%1%").arg(showC));
         m_fanGpuVal->setText(QString("%1%").arg(showG));
-        m_fanAllVal->setText(m_fanCpu->value() == m_fanGpu->value()
-                                 ? QString("%1%").arg(showC)
-                                 : QStringLiteral("auto"));
+        m_fanAllVal->setText(
+            (manualC && manualG && showC == showG) ? QString("%1%").arg(showC)
+                                                   : QStringLiteral("—"));
         m_programmatic = false;
     } else {
         m_fansKnown = false;   // nbfc missing → dash, not fake 0

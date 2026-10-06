@@ -20,19 +20,28 @@ write_all() { # $1=sysfs filename  $2=value
 
 case "$1" in
   fan)
-    # fan <pct|auto|status> — direct EC fan duty (replaces nbfc entirely)
-    [ "$#" -eq 2 ] || fail "fan argc=$#"
+    # fan <pct|auto|status|cpu PCT|gpu PCT> — direct EC fan engine
     case "$2" in
-      auto|status) ARG="$2" ;;
+      auto|status)
+        [ "$#" -eq 2 ] || fail "fan argc=$#"
+        exec /usr/local/libexec/nitro-fan "$2"
+        ;;
+      cpu|gpu)
+        [ "$#" -eq 3 ] || fail "fan $2 argc=$#"
+        case "$3" in
+          ''|*[!0-9]*) fail "fan pct '$3'" ;;
+        esac
+        [ "$3" -le 100 ] || fail "fan pct '$3' > 100"
+        exec /usr/local/libexec/nitro-fan "$2" "$3"
+        ;;
       *)
         case "$2" in
           ''|*[!0-9]*) fail "fan pct '$2'" ;;
         esac
         [ "$2" -le 100 ] || fail "fan pct '$2' > 100"
-        ARG="$2"
+        exec /usr/local/libexec/nitro-fan "$2"
         ;;
     esac
-    exec /usr/local/libexec/nitro-fan "$ARG"
     ;;
 esac
 

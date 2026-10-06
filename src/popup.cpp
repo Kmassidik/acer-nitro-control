@@ -397,6 +397,12 @@ void Popup::applyLevel(const QString &lvl, bool fansAuto)
     }
     // Segments stay enabled always — clicking one exits nbfc-auto and applies
     // that level. Pill only moves when a manual level matches.
+    // Fan sliders are manual-duty inputs: disabled while nbfc-auto owns the
+    // fans (the curve writes duty every second — slider input would fight it).
+    const bool slidersEnabled = !m_auto->isChecked();
+    for (auto *s : {m_fanAll, m_fanCpu, m_fanGpu})
+        if (s->isEnabled() != slidersEnabled)
+            s->setEnabled(slidersEnabled);
     if (m_pending.isEmpty()) {
         bool known = false;
         for (int i = 0; i < cfg::N_MANUAL; ++i)

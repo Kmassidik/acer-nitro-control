@@ -106,12 +106,21 @@ int runSelfTest()
     }();
     report("popup: auto toggle present+checkable", toggle != nullptr);
     if (toggle) {
+        // sliders must disable in auto, re-enable in manual
+        auto slidersEnabled = [&] {
+            bool all = true;
+            for (auto *s : popup.findChildren<QSlider *>())
+                all = all && s->isEnabled();
+            return all;
+        };
         const bool was = toggle->isChecked();
-        toggle->setChecked(!was);     // programmatic flip (same code path as click)
+        toggle->setChecked(true);   // auto ON
         settle(100);
-        report("popup: auto toggle flips check state",
-               toggle->isChecked() != was);
-        toggle->setChecked(was);
+        report("popup: fan sliders disabled while auto", !slidersEnabled());
+        toggle->setChecked(false);  // manual
+        settle(100);
+        report("popup: fan sliders re-enabled in manual", slidersEnabled());
+        toggle->setChecked(was);    // restore original
         settle(100);
     }
 

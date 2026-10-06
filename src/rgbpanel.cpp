@@ -19,14 +19,14 @@ Swatch::Swatch(QWidget *parent) : QFrame(parent)
 {
     setObjectName("swatch");
     setCursor(Qt::PointingHandCursor);
-    setColor(QColor("#d9a862"));
+    setColor(QColor("#cba6f7"));
 }
 
 void Swatch::setColor(const QColor &c)
 {
     m_c = c;
-    setStyleSheet(QString("background: %1; border-radius: 10px;"
-                          "border: 1px solid rgba(216,203,180,0.35);")
+    setStyleSheet(QString("background: %1; border-radius: 6px;"
+                          "border: 1px solid rgba(255,255,255,0.14);")
                       .arg(c.name()));
 }
 
@@ -48,32 +48,61 @@ static QFrame *makeHLine(QWidget *parent)
     auto *ln = new QFrame(parent);
     ln->setFrameShape(QFrame::HLine);
     ln->setFixedHeight(1);
-    ln->setStyleSheet("background: rgba(94,110,135,0.35); border: none;");
+    ln->setStyleSheet("background: rgba(255,255,255,0.06); border: none;");
     return ln;
 }
 
-RgbPanel::RgbPanel(QWidget *parent)
-    : QWidget(parent, Qt::FramelessWindowHint | Qt::Tool)
+RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
+    : QWidget(parent, Qt::FramelessWindowHint | Qt::Tool), m_openPopup(std::move(openPopup))
 {
     setAttribute(Qt::WA_TranslucentBackground, true);
     setStyleSheet(theme::stylesheet());
-    setFixedWidth(320);
+    setFixedWidth(360);
 
     auto *panel = new QFrame(this);
     panel->setObjectName("panel");
 
-    auto *hdr = new QHBoxLayout;
-    auto *dot = new QLabel(QStringLiteral("●"));
-    dot->setObjectName("dot");
-    auto *title = new QLabel("Keyboard RGB");
-    title->setObjectName("title");
+    auto *topRow = new QHBoxLayout;
     auto *x = new QPushButton("×");
     x->setObjectName("x");
     connect(x, &QPushButton::clicked, this, &QWidget::hide);
-    hdr->addWidget(dot);
-    hdr->addWidget(title);
-    hdr->addStretch();
-    hdr->addWidget(x);
+    topRow->addStretch();
+    topRow->addWidget(x);
+
+    // tab bar
+    auto *tabs = new QHBoxLayout;
+    auto *tabNitro = new QPushButton("👻 nitro");
+    tabNitro->setObjectName("tab");
+    tabNitro->setProperty("active", false);
+    connect(tabNitro, &QPushButton::clicked, this, [this] {
+        if (m_openPopup) m_openPopup();
+    });
+    auto *tabRgb = new QPushButton("rgb");
+    tabRgb->setObjectName("tab");
+    tabRgb->setProperty("active", true);
+    auto *tabLog = new QPushButton("log");
+    tabLog->setObjectName("tab");
+    tabLog->setProperty("active", false);
+    connect(tabLog, &QPushButton::clicked, this, [this] {
+        m_status->setVisible(true);
+        m_status->setText(QStringLiteral("state mode:%1 speed:%2 bright:%3%")
+                              .arg(m_state["mode"].toInt())
+                              .arg(m_state["speed"].toInt())
+                              .arg(m_state["brightness"].toInt()));
+    });
+    tabs->addWidget(tabNitro);
+    tabs->addWidget(tabRgb);
+    tabs->addWidget(tabLog);
+    tabs->addStretch();
+
+    // prompt
+    auto *prompt = new QLabel;
+    prompt->setObjectName("term");
+    prompt->setText(
+        "<span style='color:#6c7086'>~/AN515-58</span> "
+        "<span style='color:#a6e3a1'>❯</span> "
+        "<span style='color:#89b4fa'>rgb --watch</span>");
+    prompt->setTextFormat(Qt::RichText);
 
     // zones + sync
     auto *zrow = new QHBoxLayout;
@@ -101,7 +130,7 @@ RgbPanel::RgbPanel(QWidget *parent)
                 zones.append(z0.isEmpty() ? QJsonArray{217, 168, 98} : z0[0]);
             m_state["zones"] = zones;
             for (auto *z : m_zones)
-                z->setColor(QColor(z0.isEmpty() ? QColor("#d9a862").name()
+                z->setColor(QColor(z0.isEmpty() ? QColor("#cba6f7").name()
                                                 : QColor(z0[0].toArray()[0].toInt(),
                                                          z0[0].toArray()[1].toInt(),
                                                          z0[0].toArray()[2].toInt()).name()));
@@ -119,23 +148,22 @@ RgbPanel::RgbPanel(QWidget *parent)
     frow->addWidget(m_fx);
     frow->addStretch();
 
-    // modes 3x2
-    auto *grid = new QVBoxLayout;
-    grid->setSpacing(7);
-    for (int rowStart = 0; rowStart < 6; rowStart += 3) {
-        auto *line = new QHBoxLayout;
-        line->setSpacing(7);
-        for (int i = rowStart; i < rowStart + 3; ++i) {
-            auto *b = new LevelButton(MODES[i].k, MODES[i].t, MODES[i].s);
-            connect(b, &LevelButton::clicked, this, [this](const QString &k) {
-                m_state["mode"] = k.toInt();
-                for (auto it = m_modes.begin(); it != m_modes.end(); ++it)
-                    it.value()->setActive(it.key() == k);
-            });
-            m_modes[QString(MODES[i].k)] = b;
-            line->addWidget(b);
-        }
-        grid->addLayout(line);
+    // modes list
+    auto *modes = new QVBoxLayout;
+    modes->setSpacing(2);
+    for (int i = 0; i < 6; ++i) {
+        auto *b = new LevelButton(MODES[i].t, MODES[i].t, MODES[i].s);
+        connect(b, &LevelButton::clicked, this, [this](const QString &title) {
+            const QString modeKey = title;
+            for (int j = 0; j < 6; ++j)
+                if (QString::fromLatin1(MODES[j].t) == modeKey)
+                    m_state["mode"] = j;
+            for (auto it = m_modes.begin(); it != m_modes.end(); ++it)
+                it.value()->setActive(it.key() == modeKey);
+            m_status->setText(QString("mode=%1").arg(modeKey));
+        });
+        m_modes[QString(MODES[i].t)] = b;
+        modes->addWidget(b);
     }
 
     // sliders
@@ -165,20 +193,30 @@ RgbPanel::RgbPanel(QWidget *parent)
     connect(applyBtn, &QPushButton::clicked, this, &RgbPanel::apply);
     m_status = new QLabel("ready");
     m_status->setObjectName("status");
-    m_status->setAlignment(Qt::AlignCenter);
+    m_status->setTextFormat(Qt::RichText);
+    m_status->setText("<span style='color:#6c7086'>ready</span>");
+
+    auto *bottomPrompt = new QLabel;
+    bottomPrompt->setObjectName("term");
+    bottomPrompt->setTextFormat(Qt::RichText);
+    bottomPrompt->setText(
+        "<span style='color:#a6e3a1'>❯</span> <span style='color:#6c7086'>apply --state</span>");
 
     auto *lay = new QVBoxLayout(panel);
-    lay->setContentsMargins(16, 14, 16, 14);
-    lay->setSpacing(11);
-    lay->addLayout(hdr);
-    lay->addWidget(makeHLine(this));
+    lay->setContentsMargins(12, 10, 12, 12);
+    lay->setSpacing(10);
+    lay->addLayout(topRow);
+    lay->addLayout(tabs);
+    lay->addWidget(prompt);
+    lay->addSpacing(2);
     lay->addLayout(zrow);
     lay->addLayout(frow);
-    lay->addLayout(grid);
+    lay->addLayout(modes);
     lay->addLayout(speedRow);
     lay->addLayout(brightRow);
     lay->addWidget(applyBtn);
     lay->addWidget(m_status);
+    lay->addWidget(bottomPrompt);
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -206,7 +244,7 @@ void RgbPanel::loadUi()
     m_sync->setChecked(m_state["sync"].toBool());
     const int mode = m_state["mode"].toInt(1);
     for (auto it = m_modes.begin(); it != m_modes.end(); ++it)
-        it.value()->setActive(it.key().toInt() == mode);
+        it.value()->setActive(it.key().toInt() == mode || it.key() == QString::fromLatin1(MODES[mode].t));
     m_speed->setValue(m_state["speed"].toInt(4));
     m_bright->setValue(m_state["brightness"].toInt(100));
     m_speedVal->setText(QString::number(m_speed->value()));
@@ -216,7 +254,7 @@ void RgbPanel::loadUi()
 void RgbPanel::pickZone(int idx)
 {
     const QColor c = QColorDialog::getColor(m_zones[idx]->color(), this,
-                                           QString("Zone %1").arg(idx + 1));
+                                            QString("Zone %1").arg(idx + 1));
     if (!c.isValid())
         return;
     QJsonArray zones = m_state["zones"].toArray();

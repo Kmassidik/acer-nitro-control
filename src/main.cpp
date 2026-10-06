@@ -71,6 +71,7 @@ int main(int argc, char **argv)
         }
         Popup popup(&tray, [] {});
         popup.refresh();
+        popup.toggle(); // also starts refresh/anim timers for the snapshot
         return saveShot(popup, file) ? 0 : 1;
     }
 

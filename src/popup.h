@@ -5,7 +5,7 @@
 #include <functional>
 
 class QLabel;
-class QProgressBar;
+class QPushButton;
 class QTimer;
 class LevelButton;
 
@@ -24,11 +24,23 @@ protected:
 
 private:
     void place();
+    void updateBlocks();
 
     QSystemTrayIcon *m_tray;
     std::function<void()> m_openRgb;
-    QLabel *m_badge, *m_cpuFan, *m_gpuFan, *m_cpuTemp, *m_gpuTemp, *m_load;
-    QProgressBar *m_cpuBar, *m_gpuBar;
+    QLabel *m_cpuBlock, *m_gpuBlock, *m_log;
     QHash<QString, LevelButton *> m_btns;
     QTimer *m_timer;
+    QTimer *m_anim, *m_cursorBlink;
+    QLabel *m_cursor;
+
+    QString m_level = "?";
+    int m_cpuTempVal = 0, m_gpuTempVal = 0;
+    int m_targetCpuRpm = 0;
+    int m_targetGpuRpm = 0;
+    int m_uiCpuRpm = 0;
+    int m_uiGpuRpm = 0;
+    double m_cpuPhase = 0;
+    double m_gpuPhase = 0;
+    bool m_barLineRed = false;
 };

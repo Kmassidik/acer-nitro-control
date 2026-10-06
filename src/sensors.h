@@ -6,7 +6,7 @@
 namespace sensors {
 struct Fan {
     QString name;
-    double temp = 0, cur = 0, tgt = 0;
+    double temp = 0, cur = 0, tgt = 0, steps = 0;
 };
 
 QPair<int, int> readTemps();          // (cpu, gpu) °C

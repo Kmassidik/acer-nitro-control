@@ -73,7 +73,13 @@ void Tray::openPopup()
 void Tray::openRgb()
 {
     if (!m_rgb) {
-        m_rgb = new RgbPanel;
+        m_rgb = new RgbPanel(nullptr, [this] {
+            if (!m_popup)
+                m_popup = new Popup(this, [this] { openRgb(); });
+            m_popup->show();
+            m_popup->raise();
+            m_rgb->hide();
+        });
         const QRect g = geometry();
         m_rgb->move(g.center().x() - m_rgb->width() / 2, g.bottom() + 8);
     }

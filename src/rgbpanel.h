@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QWidget>
+#include <functional>
 
 class Swatch : public QFrame
 {
@@ -32,7 +33,7 @@ class RgbPanel : public QWidget
 {
     Q_OBJECT
 public:
-    explicit RgbPanel(QWidget *parent = nullptr);
+    explicit RgbPanel(QWidget *parent = nullptr, std::function<void()> openPopup = {});
 
 protected:
     void showEvent(QShowEvent *ev) override;
@@ -50,4 +51,5 @@ private:
     QHash<QString, LevelButton *> m_modes;
     QSlider *m_speed, *m_bright;
     QLabel *m_speedVal, *m_brightVal, *m_status;
+    std::function<void()> m_openPopup;
 };

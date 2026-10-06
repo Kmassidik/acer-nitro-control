@@ -21,4 +21,5 @@ private:
     QString m_key;
     QLabel *m_title, *m_sub;
     bool m_active = false;
+    QString m_titleText, m_subText;
 };

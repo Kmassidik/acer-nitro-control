@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent DBus)
 
 qt_add_executable(nitro-control)
 
@@ -22,9 +22,10 @@ target_sources(nitro-control PRIVATE
     src/ui/popup.h        src/ui/popup.cpp
     src/ui/rgbpanel.h     src/ui/rgbpanel.cpp
     src/ui/tray.h         src/ui/tray.cpp
+    src/ui/globalkeys.h   src/ui/globalkeys.cpp
 )
 
 target_include_directories(nitro-control PRIVATE src)
 
-target_link_libraries(nitro-control PRIVATE Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(nitro-control PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::DBus)
 install(TARGETS nitro-control RUNTIME DESTINATION bin)

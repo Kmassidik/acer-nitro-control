@@ -1,6 +1,7 @@
 #include "ui/tray.h"
 #include "core/config.h"
 #include "core/control.h"
+#include "ui/globalkeys.h"
 #include "ui/icon.h"
 #include "ui/popup.h"
 #include "ui/rgbpanel.h"
@@ -9,6 +10,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QCoreApplication>
+#include <QJsonObject>
 #include <QMenu>
 #include <QTimer>
 
@@ -17,6 +19,16 @@ Tray::Tray(QObject *parent) : QSystemTrayIcon(parent)
     setIcon(icon::makeIcon(45, "?", false));
     setToolTip("Nitro Control");
     buildMenu();
+
+    // Fn+F9 / Fn+F10 → keyboard backlight brightness ( Plasma global
+    // shortcuts; the hwdb maps the scancodes to kbdillumdown/up).
+    auto *keys = new qkeys::GlobalKeyListener(this);
+    if (keys->registerKeys()) {
+        connect(keys, &qkeys::GlobalKeyListener::brightUp, this,
+                [this] { nudgeRgb(+10); });
+        connect(keys, &qkeys::GlobalKeyListener::brightDown, this,
+                [this] { nudgeRgb(-10); });
+    }
 
     m_poll = new QTimer(this);
     m_poll->setInterval(cfg::POLL_MS);
@@ -91,6 +103,20 @@ void Tray::openRgb()
     }
     m_rgb->show();
     m_rgb->raise();
+}
+
+void Tray::nudgeRgb(int delta)
+{
+    // Fn+F9/F10 handler: read saved state, step brightness, apply + persist.
+    QJsonObject st = control::loadRgb();
+    const int b = qBound(0, st["brightness"].toInt(40) + delta, 100);
+    if (b == st["brightness"].toInt(-1))
+        return;   // saturation — no-op, no save spam
+    st["brightness"] = b;
+    QString err;
+    const bool ok = control::applyRgb(st, &err, true);
+    setToolTip(QString("Nitro Control — keyboard brightness %1% (%2)")
+                   .arg(b).arg(ok ? "✓" : err));
 }
 
 void Tray::poll()

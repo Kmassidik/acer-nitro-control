@@ -19,6 +19,7 @@ private:
     void buildMenu();
     void openPopup();
     void openRgb();
+    void nudgeRgb(int delta);   // Fn+F9/F10 global shortcut
 
     Popup *m_popup = nullptr;
     RgbPanel *m_rgb = nullptr;

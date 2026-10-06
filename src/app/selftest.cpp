@@ -7,6 +7,7 @@
 #include "ui/rgbpanel.h"
 #include "ui/segmented.h"
 #include "ui/tray.h"
+#include "ui/globalkeys.h"
 #include "core/sensors.h"
 
 #include <QAbstractButton>
@@ -21,6 +22,7 @@
 #include <QTimer>
 #include <QToolButton>
 #include <cstdio>
+#include <cstring>
 
 static int g_pass = 0, g_fail = 0;
 static void report(const char *name, bool ok)
@@ -204,6 +206,30 @@ int runSelfTest()
         });
         l.exec();
         report("engine: setFansAuto callback fires", fired);
+    }
+
+    // ---- global key shortcut registration (Fn+F9/F10) ----
+    {
+        qkeys::GlobalKeyListener keys;
+        const bool ok = keys.registerKeys();
+        report("keys: kglobalaccel shortscut registration", ok);
+        if (ok) {
+            // confirm both actions are now owned by nitro_control component
+            bool down = false, up = false;
+            FILE *p = popen(
+                "gdbus call --session --dest org.kde.kglobalaccel "
+                "--object-path /kglobalaccel --method "
+                "org.kde.KGlobalAccel.allComponents 2>/dev/null",
+                "r");
+            if (p) {
+                char buf[512];
+                while (fgets(buf, sizeof buf, p))
+                    if (strstr(buf, "nitro_control"))
+                        down = up = true;
+                pclose(p);
+            }
+            report("keys: nitro_control component exists", down && up);
+        }
     }
 
     std::printf("----\n%d passed, %d failed\n", g_pass, g_fail);

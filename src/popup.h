@@ -53,7 +53,8 @@ private:
     QLabel *m_desc = nullptr;
     Toggle *m_auto = nullptr;
     QLabel *m_alertRow = nullptr;
-    QLabel *m_hint = nullptr;                        // hover label for dots
+    QLabel *m_title = nullptr;                       // header text swaps on dot hover
+    QString m_baseTitle;
     QHash<QPushButton *, QString> m_dotHints;
     QSlider *m_fanAll = nullptr, *m_fanCpu = nullptr, *m_fanGpu = nullptr;
     QLabel *m_fanAllVal = nullptr, *m_fanCpuVal = nullptr, *m_fanGpuVal = nullptr;

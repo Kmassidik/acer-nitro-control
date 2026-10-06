@@ -127,9 +127,6 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     // titlebar: left traffic-light group + centered title + hover hint
     auto *dots = new QHBoxLayout;
     dots->setSpacing(7);
-    m_hint = new QLabel;
-    m_hint->setObjectName("hint");
-    m_hint->setStyleSheet("color:#8b87a3; font-size:11px; background:transparent;");
     auto mkDot = [this](const char *cls, std::function<void()> act,
                         const QString &label) {
         auto *d = new QPushButton(this);
@@ -162,12 +159,13 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
             m_openPopup();
     }, "Thermal control"));
     dots->addSpacing(10);
-    auto *ttl = new QLabel("Keyboard RGB");
+    m_baseTitle = QStringLiteral("Keyboard RGB");
+    auto *ttl = new QLabel(m_baseTitle);
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
-    dots->addWidget(m_hint);
     dots->addSpacing(12);
+    m_title = ttl;
 
     // keyboard preview
     m_kb = new QWidget;
@@ -482,11 +480,11 @@ void RgbPanel::apply()
 bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
 {
     if (auto *btn = qobject_cast<QPushButton *>(watched)) {
-        if (m_dotHints.contains(btn)) {
+        if (m_dotHints.contains(btn) && m_title) {
             if (event->type() == QEvent::Enter)
-                m_hint->setText(m_dotHints.value(btn));
+                m_title->setText(m_dotHints.value(btn));
             else if (event->type() == QEvent::Leave)
-                m_hint->clear();
+                m_title->setText(m_baseTitle);
         }
     }
     const QEvent::Type type = event->type();

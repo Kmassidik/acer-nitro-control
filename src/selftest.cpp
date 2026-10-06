@@ -68,22 +68,22 @@ int runSelfTest()
     report("popup: amber max dot exists", maxDot != nullptr);
     report("popup: violet rgb dot exists", rgbDot != nullptr);
 
-    // hover hint label appears next to title
+    // hover swaps header title to the dot's purpose
     bool hintWorks = false;
     const auto labels = popup.findChildren<QLabel *>();
     for (auto *l : labels)
-        if (l->objectName() == "hint") {
+        if (l->objectName() == "ttlc") {
             QEvent enter(QEvent::Enter);
             QApplication::sendEvent(maxDot, &enter);
             settle(30);
-            hintWorks = !l->text().isEmpty();
+            hintWorks = (l->text() == "Maximize / restore");
             QEvent leave(QEvent::Leave);
             QApplication::sendEvent(maxDot, &leave);
             settle(30);
-            hintWorks = hintWorks && l->text().isEmpty();
+            hintWorks = hintWorks && (l->text() == "Nitro AN515-58");
             break;
         }
-    report("popup: hover shows dot label hint", hintWorks);
+    report("popup: hover swaps title to dot purpose", hintWorks);
 
     if (maxDot) {
         const QRect before = popup.geometry();

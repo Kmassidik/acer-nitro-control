@@ -77,7 +77,8 @@ private:
     QLabel *m_brightVal = nullptr, *m_speedVal = nullptr;
     Toggle *m_link = nullptr;
     QLabel *m_status = nullptr;
-    QLabel *m_hint = nullptr;                        // hover label for dots
+    QLabel *m_title = nullptr;                       // header text swaps on dot hover
+    QString m_baseTitle;
     QHash<QPushButton *, QString> m_dotHints;
     std::function<void()> m_openPopup;
     QTimer *m_paintTimer = nullptr;        // live effect animation (only while visible)

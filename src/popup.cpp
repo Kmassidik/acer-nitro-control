@@ -115,9 +115,6 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *dots = new QHBoxLayout;
     dots->setContentsMargins(0, 0, 0, 0);
     dots->setSpacing(7);
-    m_hint = new QLabel;
-    m_hint->setObjectName("hint");
-    m_hint->setStyleSheet("color:#8b87a3; font-size:11px; background:transparent;");
     auto mkDot = [this](const char *cls, std::function<void()> act,
                         const QString &label) {
         auto *d = new QPushButton(this);
@@ -137,12 +134,13 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     dots->addWidget(mkDot("dotRgb", [this] { if (m_openRgb) m_openRgb(); },
                           "Keyboard RGB"));
     dots->addSpacing(10);
-    auto *ttl = new QLabel("Nitro AN515-58");
+    m_baseTitle = QStringLiteral("Nitro AN515-58");
+    auto *ttl = new QLabel(m_baseTitle);
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
-    dots->addWidget(m_hint);
     dots->addSpacing(12);   // counterweights the 42px button group + spacing
+    m_title = ttl;
 
     // ring: readout painted inside TempRing
     m_ring = new TempRing;
@@ -495,13 +493,13 @@ void Popup::toggleMax()
 // shared-drag helpers identical with RGB panel (kept intentionally tiny)
 bool Popup::eventFilter(QObject *watched, QEvent *event)
 {
-    // hover hint: show the hovered dot's label next to the title
+    // hover hint: swap the header text itself to the dot's purpose
     if (auto *btn = qobject_cast<QPushButton *>(watched)) {
-        if (m_dotHints.contains(btn)) {
+        if (m_dotHints.contains(btn) && m_title) {
             if (event->type() == QEvent::Enter)
-                m_hint->setText(m_dotHints.value(btn));
+                m_title->setText(m_dotHints.value(btn));
             else if (event->type() == QEvent::Leave)
-                m_hint->clear();
+                m_title->setText(m_baseTitle);
         }
     }
     const QEvent::Type type = event->type();

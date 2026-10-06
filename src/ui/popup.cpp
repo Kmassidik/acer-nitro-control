@@ -400,27 +400,33 @@ void Popup::refresh()
         // 4 s intent window (fresh write may not be reflected yet).
         const int curC = int(qBound(0.0, fans[0].cur, 100.0));
         const int curG = int(qBound(0.0, fans[1].cur, 100.0));
-        // Echo the COMMANDED per-fan duty (state files) — not the
-        // banked-register readback which cycles 0x00/0x0C/0x30/0x51 and made
-        // dragged sliders snap back to ~21% (the tach) after a 0/100 release.
-        // Manual fan: commanded value IS the truth for THAT fan. Auto: tach.
-        const bool manualC = !fans[0].autoCtl && fans[0].cmdDuty >= 0;
-        const bool manualG = !fans[1].autoCtl && fans[1].cmdDuty >= 0;
-        int showC = manualC ? fans[0].cmdDuty : curC;
-        int showG = manualG ? fans[1].cmdDuty : curG;
+        // Echo the COMMANDED per-fan duty. In MANUAL with a known command:
+        // commanded value; in MANUAL with unknown command (helper files not
+        // yet written this session, cmdDuty=-9): leave the sliders EXACTLY
+        // where the user put them — never reposition from the tach (the
+        // screencast bug: sliders drifted toward the easing RPM).
+        // In AUTO: sliders are the curve's live mirror (tach) — fine.
+        const bool manualC = !fans[0].autoCtl;
+        const bool manualG = !fans[1].autoCtl;
+        const bool knownC = manualC && fans[0].cmdDuty >= 0;
+        const bool knownG = manualG && fans[1].cmdDuty >= 0;
+        int showC = knownC ? fans[0].cmdDuty : (manualC ? m_fanCpu->value() : curC);
+        int showG = knownG ? fans[1].cmdDuty : (manualG ? m_fanGpu->value() : curG);
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;
         m_programmatic = true;   // silent propagation — no commit relay
-        if (!inGrace && !m_fanCpu->isSliderDown() && m_fanCpu->value() != showC)
+        if (!inGrace && !m_fanCpu->isSliderDown() &&
+            (knownC || !manualC) && m_fanCpu->value() != showC)
             m_fanCpu->setValue(showC);
-        if (!inGrace && !m_fanGpu->isSliderDown() && m_fanGpu->value() != showG)
+        if (!inGrace && !m_fanGpu->isSliderDown() &&
+            (knownG || !manualG) && m_fanGpu->value() != showG)
             m_fanGpu->setValue(showG);
         m_fanCpuVal->setText(QString("%1%").arg(showC));
         m_fanGpuVal->setText(QString("%1%").arg(showG));
         m_fanAllVal->setText(
-            (manualC && manualG && showC == showG) ? QString("%1%").arg(showC)
-                                                   : QStringLiteral("—"));
+            (knownC && knownG && showC == showG) ? QString("%1%").arg(showC)
+                                                 : QStringLiteral("—"));
         m_programmatic = false;
     } else {
         m_fansKnown = false;   // nbfc missing → dash, not fake 0

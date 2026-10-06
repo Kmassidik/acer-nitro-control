@@ -5,6 +5,7 @@
 #   nitro-priv thermal on | off
 #   nitro-priv cpu GOV EPP TURBO      (fixed tokens; TURBO is 0|1)
 set -u
+logger -t nitro-priv "invoked: $*"
 
 fail() { logger -t nitro-priv "rejected: $*"; exit 2; }
 

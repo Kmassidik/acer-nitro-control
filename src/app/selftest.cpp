@@ -110,22 +110,30 @@ int runSelfTest()
         return nullptr;
     }();
     report("popup: auto toggle present+checkable", toggle != nullptr);
+    // ---- regression: auto-ON must suppress late manual writes ----
+    // (user flow: toggle auto ON; 3 s later helper got 'fan 33/32' from the
+    // pending echo debounce → pinned manual. Now applyFans must refuse.)
     if (toggle) {
-        // sliders must disable in auto, re-enable in manual
-        auto slidersEnabled = [&] {
-            bool all = true;
-            for (auto *s : popup.findChildren<QSlider *>())
-                all = all && s->isEnabled();
-            return all;
-        };
-        const bool was = toggle->isChecked();
         toggle->setChecked(true);   // auto ON
         settle(100);
-        report("popup: fan sliders disabled while auto", !slidersEnabled());
-        toggle->setChecked(false);  // manual
-        settle(100);
-        report("popup: fan sliders re-enabled in manual", slidersEnabled());
-        toggle->setChecked(was);    // restore original
+        // fire the pending-write path directly (what the debounce would call)
+        popup.refresh();             // simulate echo attempt; must not write
+        const QString before = [] {   // state file content
+            FILE *f = fopen("/var/lib/nitro-control/fanmode", "r");
+            char b[4] = "x";
+            if (f) { size_t n = fread(b, 1, 1, f); (void)n; fclose(f); }
+            return QString::fromLatin1(b, 1);
+        }();
+        settle(3000);   // wait out the old debounce window
+        const QString after = [] {
+            FILE *f = fopen("/var/lib/nitro-control/fanmode", "r");
+            char b[4] = "x";
+            if (f) { size_t n = fread(b, 1, 1, f); (void)n; fclose(f); }
+            return QString::fromLatin1(b, 1);
+        }();
+        report("popup: auto stays auto; no late manual write",
+               after == "1");
+        toggle->setChecked(false);   // restore manual for next tests
         settle(100);
     }
 

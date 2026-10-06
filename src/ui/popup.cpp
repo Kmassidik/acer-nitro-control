@@ -203,7 +203,7 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
 
     // fan control rows (DAM-style: manual % per fan; auto toggle re-delegates)
     auto fanRow = [this](const char *name, QSlider *&s, QLabel *&val,
-                         std::function<void(int)> onChange) {
+                         std::function<void(int)> onCommit) {
         s = new QSlider(Qt::Horizontal);
         s->setRange(0, 100);
         val = new QLabel("auto");
@@ -216,9 +216,13 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         h->addWidget(b);
         h->addWidget(s, 1);
         h->addWidget(val);
-        connect(s, &QSlider::valueChanged, this, [this, val, onChange](int v) {
-            val->setText(QString("%1%").arg(v));
-            onChange(v);
+        // live label while dragging; the WRITE commits on physical release
+        // only — valueChanged fires from programmatic echo too, and each of
+        // those became an EC write (tach→slider→write feedback loop).
+        connect(s, &QSlider::valueChanged, this,
+                [this, val](int v) { val->setText(QString("%1%").arg(v)); });
+        connect(s, &QSlider::sliderReleased, this, [this, s, onCommit] {
+            onCommit(s->value());
         });
         auto *w = new QWidget;
         w->setLayout(h);
@@ -226,16 +230,14 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     };
     m_fanAll = nullptr;
     auto *allRow = fanRow("All", m_fanAll, m_fanAllVal, [this](int v) {
-        if (m_programmatic)
-            return;
         m_programmatic = true;
         m_fanCpu->setValue(v);
         m_fanGpu->setValue(v);
         m_programmatic = false;
-        scheduleFanWrite();
+        applyFans();
     });
-    auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal, [this](int) { scheduleFanWrite(); });
-    auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal, [this](int) { scheduleFanWrite(); });
+    auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal, [this](int) { applyFans(); });
+    auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal, [this](int) { applyFans(); });
 
     auto *hline = new QFrame(this);
     hline->setObjectName("hline");
@@ -254,6 +256,7 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
         m_intentAuto = on;
         if (on) {
+            // no pending-write risk: writes commit only on physical release
             control::setFansAuto([this] { refresh(); });
             m_pending = QStringLiteral("A");
             m_desc->setText(QStringLiteral("applying auto (thermal guard)…"));
@@ -462,20 +465,14 @@ void Popup::applySelection()
     control::setLevelAsync(applied, [this] { refresh(); });
 }
 
-void Popup::scheduleFanWrite()
-{
-    // coalesce 120ms of slider movement into ONE nbfc write
-    if (!m_fanDebounce) {
-        m_fanDebounce = new QTimer(this);
-        m_fanDebounce->setSingleShot(true);
-        m_fanDebounce->setInterval(120);
-        connect(m_fanDebounce, &QTimer::timeout, this, &Popup::applyFans);
-    }
-    m_fanDebounce->start();
-}
-
 void Popup::applyFans()
 {
+    // INVARIANT: never commit a manual duty while auto is selected (the
+    // toggle-then-echo race wrote 33/32 three seconds after every 'auto' —
+    // the pending debounce from the echo's valueChanged fired after the
+    // helper had already flipped to the EC curve and re-pinned manual).
+    if (m_auto->isChecked())
+        return;
     const int cpu = m_fanCpu->value();
     const int gpu = m_fanGpu->value();
     if (cpu >= 0 && cpu == gpu)

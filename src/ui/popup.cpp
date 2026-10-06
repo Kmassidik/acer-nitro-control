@@ -125,14 +125,16 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         d->setAttribute(Qt::WA_LayoutOnEntireRect);
         d->installEventFilter(this);
         m_dotHints[d] = label;
-        connect(d, &QPushButton::clicked, this, act);
+        connect(d, &QPushButton::clicked, this, [this, act] {
+            if (act)                    // INVARIANT: empty fn must never fire
+                act();                  // (was a live std::bad_function_call)
+        });
         return d;
     };
-    // RGB switch button only — the popup IS the fan panel
-    m_rgbBtn = mkBtn("utilBtn", {}, "RGB panel");
+    // RGB switch — hands control to the RGB window (owned by Tray)
+    m_rgbBtn = mkBtn("utilBtn",
+                     [this] { if (m_openRgb) m_openRgb(); }, "RGB panel");
     m_rgbBtn->setText("RGB");
-    connect(m_rgbBtn, &QPushButton::clicked, this,
-            [this] { if (m_openRgb) m_openRgb(); });
     dots->addWidget(m_rgbBtn);
     dots->addSpacing(10);
     m_baseTitle = QStringLiteral("Nitro AN515-58");

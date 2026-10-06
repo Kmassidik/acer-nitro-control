@@ -13,6 +13,7 @@
 #include <QApplication>
 #include <QEventLoop>
 #include <QLabel>
+#include <QMetaObject>
 #include <QMouseEvent>
 #include <QMessageBox>
 #include <QPushButton>
@@ -64,6 +65,14 @@ int runSelfTest()
     };
     auto *rgbBtn = dotAt("utilBtn");
     report("popup: RGB utility button exists", rgbBtn != nullptr);
+    if (rgbBtn) {
+        // THE CRASH PATH: clicking RGB with an empty std::function slot
+        // used to throw std::bad_function_call → SIGABRT. Must survive.
+        clickBtn(rgbBtn);
+        settle(100);
+        report("popup: RGB switch click survives (was bad_function_call)",
+               true);
+    }
 
     // hover swaps header title to the button's purpose
     bool hintWorks = false;
@@ -163,15 +172,16 @@ int runSelfTest()
     report("rgb: link toggle present", hasLink);
 
     if (hasApply) {
-        // Apply path hits the real RGB device — on a dev box without facer
-        // this must FAIL GRACEFULLY with an error string, not crash.
-        for (auto *b : panel.findChildren<QPushButton *>())
-            if (b->objectName() == "applyBtn") {
-                clickBtn(b);
-                settle(200);
-                break;
-            }
-        report("rgb: apply survives missing device (no crash)", true);
+        // click every button EXCEPT those opening modal dialogs (the "+"
+        // custom-color picker blocks offscreen — dialog, not crash)
+        const auto btns = panel.findChildren<QPushButton *>();
+        for (auto *b : btns) {
+            if (b->text() == "+")
+                continue;
+            clickBtn(b);
+            settle(30);
+        }
+        report("rgb: every button click survives", true);
     }
     // keyboard preview must have 75 keycaps
     int keycaps = 0;
@@ -184,14 +194,16 @@ int runSelfTest()
 
     // ---- engine-level assertions (async wrappers) ----
     {
-        // 3-second bounded wait for async fan ctrl completion
-        bool done = false;
-        QTimer::singleShot(3000, [&] { done = true; });
-        control::setFansAuto([&] { report("engine: setFansAuto callback fires",
-                                          true); done = true; });
-        settle(100);
-        while (!done)
-            settle(50);
+        // bounded: async nbfc can take ~2s; timeout at 5s ⇒ FAIL, not hang
+        QEventLoop l;
+        bool fired = false;
+        QTimer::singleShot(5000, &l, &QEventLoop::quit);
+        control::setFansAuto([&] {
+            fired = true;
+            QMetaObject::invokeMethod(&l, "quit", Qt::QueuedConnection);
+        });
+        l.exec();
+        report("engine: setFansAuto callback fires", fired);
     }
 
     std::printf("----\n%d passed, %d failed\n", g_pass, g_fail);

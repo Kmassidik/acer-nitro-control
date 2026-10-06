@@ -136,7 +136,10 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
         d->setAttribute(Qt::WA_LayoutOnEntireRect);
         d->installEventFilter(this);
         m_dotHints[d] = label;
-        connect(d, &QPushButton::clicked, this, act);
+        connect(d, &QPushButton::clicked, this, [this, act] {
+            if (act)                    // INVARIANT: empty fn must never fire
+                act();
+        });
         return d;
     };
     auto *fanBtn = mkBtn([this] {

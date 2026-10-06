@@ -1,4 +1,5 @@
 #pragma once
+#include <QHash>
 #include <QPoint>
 #include <QRect>
 #include <QSystemTrayIcon>
@@ -52,6 +53,8 @@ private:
     QLabel *m_desc = nullptr;
     Toggle *m_auto = nullptr;
     QLabel *m_alertRow = nullptr;
+    QLabel *m_hint = nullptr;                        // hover label for dots
+    QHash<QPushButton *, QString> m_dotHints;
     QSlider *m_fanAll = nullptr, *m_fanCpu = nullptr, *m_fanGpu = nullptr;
     QLabel *m_fanAllVal = nullptr, *m_fanCpuVal = nullptr, *m_fanGpuVal = nullptr;
     bool m_programmatic = false;   // suppress slider echoes while syncing UI

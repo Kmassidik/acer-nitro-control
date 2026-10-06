@@ -11,6 +11,7 @@
 #include <QAbstractButton>
 #include <QApplication>
 #include <QEventLoop>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QMessageBox>
 #include <QPushButton>
@@ -66,6 +67,23 @@ int runSelfTest()
     report("popup: red close dot exists", closeDot != nullptr);
     report("popup: amber max dot exists", maxDot != nullptr);
     report("popup: violet rgb dot exists", rgbDot != nullptr);
+
+    // hover hint label appears next to title
+    bool hintWorks = false;
+    const auto labels = popup.findChildren<QLabel *>();
+    for (auto *l : labels)
+        if (l->objectName() == "hint") {
+            QEvent enter(QEvent::Enter);
+            QApplication::sendEvent(maxDot, &enter);
+            settle(30);
+            hintWorks = !l->text().isEmpty();
+            QEvent leave(QEvent::Leave);
+            QApplication::sendEvent(maxDot, &leave);
+            settle(30);
+            hintWorks = hintWorks && l->text().isEmpty();
+            break;
+        }
+    report("popup: hover shows dot label hint", hintWorks);
 
     if (maxDot) {
         const QRect before = popup.geometry();

@@ -1,5 +1,6 @@
 #pragma once
 #include <QColor>
+#include <QHash>
 #include <QJsonObject>
 #include <QPoint>
 #include <QRect>
@@ -76,6 +77,8 @@ private:
     QLabel *m_brightVal = nullptr, *m_speedVal = nullptr;
     Toggle *m_link = nullptr;
     QLabel *m_status = nullptr;
+    QLabel *m_hint = nullptr;                        // hover label for dots
+    QHash<QPushButton *, QString> m_dotHints;
     std::function<void()> m_openPopup;
     QTimer *m_paintTimer = nullptr;        // live effect animation (only while visible)
     double m_t = 0;

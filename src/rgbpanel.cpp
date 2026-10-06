@@ -124,9 +124,12 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     lay->setContentsMargins(22, 10, 22, 22);
     lay->setSpacing(6);
 
-    // titlebar: left traffic-light group + centered title
+    // titlebar: left traffic-light group + centered title + hover hint
     auto *dots = new QHBoxLayout;
     dots->setSpacing(7);
+    m_hint = new QLabel;
+    m_hint->setObjectName("hint");
+    m_hint->setStyleSheet("color:#8b87a3; font-size:11px; background:transparent;");
     auto mkDot = [this](const char *cls, std::function<void()> act,
                         const QString &label) {
         auto *d = new QPushButton(this);
@@ -135,6 +138,8 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
         d->setCursor(Qt::PointingHandCursor);
         d->setToolTip(label);
         d->setAttribute(Qt::WA_LayoutOnEntireRect);
+        d->installEventFilter(this);
+        m_dotHints[d] = label;
         connect(d, &QPushButton::clicked, this, act);
         return d;
     };
@@ -161,7 +166,8 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     ttl->setObjectName("ttlc");
     ttl->setAlignment(Qt::AlignCenter);
     dots->addWidget(ttl, 1);
-    dots->addSpacing(52);
+    dots->addWidget(m_hint);
+    dots->addSpacing(12);
 
     // keyboard preview
     m_kb = new QWidget;
@@ -475,6 +481,14 @@ void RgbPanel::apply()
 // drag helpers (same strategy as Popup)
 bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
 {
+    if (auto *btn = qobject_cast<QPushButton *>(watched)) {
+        if (m_dotHints.contains(btn)) {
+            if (event->type() == QEvent::Enter)
+                m_hint->setText(m_dotHints.value(btn));
+            else if (event->type() == QEvent::Leave)
+                m_hint->clear();
+        }
+    }
     const QEvent::Type type = event->type();
     if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
         type == QEvent::MouseButtonRelease) {

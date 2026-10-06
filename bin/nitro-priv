@@ -36,20 +36,29 @@ case "$1" in
     ;;
 esac
 
-case "$1 $2" in
-  "thermal on")  systemctl enable --now nitro-thermal; exit $? ;;
-  "thermal off") systemctl stop nitro-thermal; exit $? ;;
-  "cpu cpu")     : ;;   # cpu <GOV> <EPP> <TURBO> — validated below
-  *)             fail "cmd '$1 $2'" ;;
+case "$1" in
+  cpu)
+    # cpu GOV EPP TURBO (4 argv; GOV=$2, EPP=$3, TURBO=$4)
+    [ "$#" -eq 4 ] || fail "cpu argc=$#"
+    case "$2" in powersave|performance|balance_power|balance_performance) ;;
+      *) fail "gov '$2'" ;; esac
+    case "$3" in power|balance_power|balance_performance|performance) ;;
+      *) fail "epp '$3'" ;; esac
+    case "$4" in 0|1) ;; *) fail "turbo '$4'" ;; esac
+    rc=0
+    write_all scaling_governor "$2"                       || rc=1
+    write_all energy_performance_preference "$3"          || rc=1
+    echo "$4" > /sys/devices/system/cpu/intel_pstate/no_turbo || rc=1
+    exit $rc
+    ;;
+  thermal)
+    case "$2" in
+      on)  systemctl enable --now nitro-thermal; exit $? ;;
+      off) systemctl stop nitro-thermal; exit $? ;;
+      *)   fail "thermal '$2'" ;;
+    esac
+    ;;
+  *) fail "cmd '$1'" ;;
 esac
+exit 1
 
-[ "$#" -eq 5 ] || fail "cpu argc=$#"
-case "$3" in powersave|performance|balance_power|balance_performance) ;; *) fail "gov '$3'" ;; esac
-case "$4" in power|balance_power|balance_performance|performance)       ;; *) fail "epp '$4'" ;; esac
-case "$5" in 0|1)                                                       ;; *) fail "turbo '$5'" ;; esac
-
-rc=0
-write_all scaling_governor "$3"                       || rc=1
-write_all energy_performance_preference "$4"          || rc=1
-echo "$5" > /sys/devices/system/cpu/intel_pstate/no_turbo || rc=1
-exit $rc

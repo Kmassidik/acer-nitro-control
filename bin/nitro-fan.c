@@ -45,16 +45,29 @@ int main(int argc, char **argv)
     if (ioperm(0x62, 1, 1) || ioperm(0x66, 1, 1)) { perror("ioperm"); return 1; }
 
     if (strcmp(argv[1], "status") == 0) {
+        // Tach words are trustworthy; the 0x33/0x34 mode registers are NOT —
+        // they span EC banks and every read returns a different view
+        // (observed: 0x00→0x0C→0x03 within seconds with no writer alive).
+        // So the mode we report = the mode we last commanded, persisted.
         const unsigned cw = rd(0x13) | (rd(0x14) << 8);
         const unsigned gw = rd(0x15) | (rd(0x16) << 8);
-        const int isAuto = (rd(0x34) == 0x00 && rd(0x33) == 0x00) ? 1 : 0;
+        int isAuto = 0;
+        FILE *f = fopen("/var/lib/nitro-control/fanmode", "r");
+        if (f) {
+            int v = 0;
+            if (fscanf(f, "%d", &v) == 1)
+                isAuto = v;
+            fclose(f);
+        }
         printf("%u %u %d\n", cw, gw, isAuto);
         return 0;
     }
     if (strcmp(argv[1], "auto") == 0) {
         ecwr(0x03, 0x51);   // unlock
-        ecwr(0x34, 0x00);   // CPU fan → auto (EC curve)
-        ecwr(0x33, 0x00);   // GPU fan → auto
+        ecwr(0x34, 0x04);   // CPU fan → auto (firmware curve; nbfc's reset value)
+        ecwr(0x33, 0x10);   // GPU fan → auto
+        FILE *f = fopen("/var/lib/nitro-control/fanmode", "w");
+        if (f) { fprintf(f, "1"); fclose(f); }
         printf("fan: auto (EC curve)\n");
         return 0;
     }
@@ -67,6 +80,8 @@ int main(int argc, char **argv)
     ecwr(0x33, 0x30);       // GPU fan manual
     ecwr(0x37, p);          // CPU duty
     ecwr(0x3A, p);          // GPU duty
+    FILE *f = fopen("/var/lib/nitro-control/fanmode", "w");
+    if (f) { fprintf(f, "0"); fclose(f); }
     printf("fan: %d%%\n", pct);
     return 0;
 }

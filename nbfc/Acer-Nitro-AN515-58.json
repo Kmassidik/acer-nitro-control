@@ -1,6 +1,6 @@
 {
   "NotebookModel": "Nitro AN515-58",
-  "Author": "zaujulio",
+  "Author": "Kurnia Massidik (tuned from zaujulio's community curve)",
   "EcPollInterval": 1000,
   "CriticalTemperature": 84,
   "CriticalTemperatureOffset": 5,

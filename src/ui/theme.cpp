@@ -44,6 +44,8 @@ QPushButton#utilBtn {
   padding: 2px 12px; color: #cfcce6; font-size: 12px;
 }
 QPushButton#utilBtn:hover { background: rgba(255,255,255,0.14); color: #ffffff; }
+QPushButton#closeBtn { padding: 2px 0; color: #f87171; }
+QPushButton#closeBtn:hover { background: rgba(248,113,113,0.22); color: #f87171; }
 QLabel#bigTemp { font-size: 46px; font-weight: 600; letter-spacing: -0.03em; background: transparent; }
 QLabel#ringLbl { font-size: 11px; color: #8b87a3; letter-spacing: 0.12em; background: transparent; }
 QLabel#statLbl { font-size: 11px; color: #8b87a3; background: transparent; }

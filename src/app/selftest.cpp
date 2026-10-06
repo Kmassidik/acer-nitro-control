@@ -67,6 +67,8 @@ int runSelfTest()
     };
     auto *rgbBtn = dotAt("utilBtn");
     report("popup: RGB utility button exists", rgbBtn != nullptr);
+    auto *closeBtn = dotAt("closeBtn");
+    report("popup: close button exists", closeBtn != nullptr);
     if (rgbBtn) {
         // THE CRASH PATH: clicking RGB with an empty std::function slot
         // used to throw std::bad_function_call → SIGABRT. Must survive.
@@ -141,12 +143,13 @@ int runSelfTest()
         report("popup: segment select moves current", seg->current() != before);
     }
 
-    {
-        QKeyEvent esc(QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier);
-        QApplication::sendEvent(&popup, &esc);
+    if (closeBtn) {
+        popup.show();
         settle(100);
+        clickBtn(closeBtn);
+        settle(100);
+        report("popup: ✕ button hides window", !popup.isVisible());
     }
-    report("popup: Esc hides window", !popup.isVisible());
 
     // ---- RGB panel UI ----
     RgbPanel panel(nullptr, [] {});

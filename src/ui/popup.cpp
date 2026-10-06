@@ -131,7 +131,11 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         });
         return d;
     };
-    // RGB switch — hands control to the RGB window (owned by Tray)
+    // Close + RGB switch — close hides the panel (re-open from tray click)
+    auto *closeBtn = mkBtn("closeBtn", [this] { hide(); }, "Close");
+    closeBtn->setText("✕");
+    closeBtn->setFixedWidth(26);
+    dots->addWidget(closeBtn);
     m_rgbBtn = mkBtn("utilBtn",
                      [this] { if (m_openRgb) m_openRgb(); }, "RGB panel");
     m_rgbBtn->setText("RGB");

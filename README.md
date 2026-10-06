@@ -72,36 +72,46 @@ nitro-control                     run tray (single instance)
 nitro-control --restore-rgb       re-apply saved RGB state (headless)
 nitro-control --restore-rgb --state FILE
 nitro-control --screenshot popup|rgb|icon FILE   offscreen UI snapshot
+nitro-control --selftest                         run the UI test suite (exit 0 = pass)
 ```
 
 ## Layout
 
+Layered — `core` is the engine (no Qt widgets), `ui` is all on-screen stuff,
+`app` is the entry point:
+
 ```
 src/
-  config.h          tunables: thresholds, level table, paths
-  sensors.*         coretemp / nvidia-smi / nbfc readers
-  control.*         read & apply performance level (async), RGB protocol + state
-  theme.*           Glass Ghost palette + Qt stylesheet
-  icon.*            tray gauge icon (QPainter)
-  segmented.*       sliding-pill segmented control + iOS toggle
-  popup.*           Glass Ghost popup applet (fan control, temp ring)
-  rgbpanel.*        Glass Ghost RGB panel (live keyboard preview)
-  tray.*            system-tray icon, menu, hot pulse
-  main.cpp          CLI: tray / --restore-rgb / --screenshot
-bin/                turbo-lvl + nitro-priv (root whitelist) + nitro-thermal-guard
-systemd/            user units + system-sleep RGB hook
-nbfc/               fan curve config
-docs/               screenshots
+  core/
+    config.h          tunables: thresholds, level table, paths
+    sensors.*         coretemp / nvidia-smi / nbfc readers (line parser)
+    control.*         apply performance level (async), fan duty via nbfc,
+                      RGB protocol + state
+  ui/
+    theme.*           Glass Ghost palette + Qt stylesheet
+    icon.*            tray fan-rotor icon (QPainter)
+    segmented.*       sliding-pill segmented control + iOS toggle
+    popup.*           Glass Ghost popup (temp ring, fan sliders, modes)
+    rgbpanel.*        Glass Ghost RGB panel (live keyboard preview)
+    tray.*            system-tray icon, menu, hot pulse
+  app/
+    main.cpp          CLI: tray / --restore-rgb / --screenshot / --selftest
+    selftest.cpp      offscreen UI test driver (17+ assertions)
+bin/                  turbo-lvl + nitro-priv (root whitelist) + nitro-thermal-guard
+systemd/              user units + system-sleep RGB hook
+nbfc/                 fan curve config (Author: Kurnia Massidik)
+docs/                 screenshots
 ```
 
 ## Customizing
 
-- **Palette / QSS** — `src/theme.cpp`, fonts in `src/config.h`
-- **Level table** — `src/config.h` `LEVELS` — and keep the token set in
+- **Palette / QSS** — `src/ui/theme.cpp`, fonts in `src/core/config.h`
+- **Level table** — `src/core/config.h` `LEVELS` — and keep the token set in
   `bin/nitro-priv` in sync if you add governor/EPP values
-- **Temps / timing** — `src/config.h` (`HOT_C`, `COOL_C`, `POLL_MS`, `PULSE_MS`)
+- **Temps / timing** — `src/core/config.h` (`HOT_C`, `COOL_C`, `POLL_MS`, `PULSE_MS`)
 - **UI verification** —
   `QT_QPA_PLATFORM=offscreen ./build/nitro-control --screenshot popup /tmp/p.png`
+  or run the whole UI suite: `QT_QPA_PLATFORM=offscreen ./build/nitro-control --selftest`
 
 ## Related
 

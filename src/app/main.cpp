@@ -1,9 +1,9 @@
-#include "config.h"
-#include "control.h"
-#include "icon.h"
-#include "popup.h"
-#include "rgbpanel.h"
-#include "tray.h"
+#include "core/config.h"
+#include "core/control.h"
+#include "ui/icon.h"
+#include "ui/popup.h"
+#include "ui/rgbpanel.h"
+#include "ui/tray.h"
 
 #include <QApplication>
 #include <QCoreApplication>

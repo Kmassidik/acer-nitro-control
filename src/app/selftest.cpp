@@ -1,13 +1,13 @@
 // --selftest: offscreen UI test driver.
 // Clicks every interactive control and asserts observable effects.
 // Exit 0 = all pass. Findings print as "PASS/FAIL: <name>".
-#include "config.h"
-#include "control.h"
-#include "popup.h"
-#include "rgbpanel.h"
-#include "segmented.h"
-#include "tray.h"
-#include "sensors.h"
+#include "core/config.h"
+#include "core/control.h"
+#include "ui/popup.h"
+#include "ui/rgbpanel.h"
+#include "ui/segmented.h"
+#include "ui/tray.h"
+#include "core/sensors.h"
 
 #include <QAbstractButton>
 #include <QApplication>

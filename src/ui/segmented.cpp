@@ -1,4 +1,4 @@
-#include "segmented.h"
+#include "ui/segmented.h"
 
 #include <QEasingCurve>
 #include <QEvent>

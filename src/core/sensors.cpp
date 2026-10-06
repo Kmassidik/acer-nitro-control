@@ -1,4 +1,4 @@
-#include "sensors.h"
+#include "core/sensors.h"
 
 #include <QDir>
 #include <QFile>

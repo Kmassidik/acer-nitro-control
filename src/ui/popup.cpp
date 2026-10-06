@@ -1,9 +1,9 @@
-#include "popup.h"
-#include "config.h"
-#include "control.h"
-#include "sensors.h"
-#include "segmented.h"
-#include "theme.h"
+#include "ui/popup.h"
+#include "core/config.h"
+#include "core/control.h"
+#include "core/sensors.h"
+#include "ui/segmented.h"
+#include "ui/theme.h"
 
 #include <QAbstractButton>
 #include <QAbstractSlider>

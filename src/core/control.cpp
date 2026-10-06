@@ -1,5 +1,5 @@
-#include "control.h"
-#include "config.h"
+#include "core/control.h"
+#include "core/config.h"
 
 #include <QDir>
 #include <QFile>

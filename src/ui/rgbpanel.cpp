@@ -1,10 +1,10 @@
 // Glass Ghost RGB panel — live animated keyboard preview, 4 zones,
 // effects, palette, brightness/speed, link toggle. Real device writes on Apply.
-#include "rgbpanel.h"
-#include "config.h"
-#include "control.h"
-#include "segmented.h"
-#include "theme.h"
+#include "ui/rgbpanel.h"
+#include "core/config.h"
+#include "core/control.h"
+#include "ui/segmented.h"
+#include "ui/theme.h"
 
 #include <QAbstractButton>
 #include <QAbstractSlider>

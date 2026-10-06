@@ -1,5 +1,5 @@
-#include "theme.h"
-#include "config.h"
+#include "ui/theme.h"
+#include "core/config.h"
 
 namespace theme {
 

@@ -1,10 +1,10 @@
-#include "tray.h"
-#include "config.h"
-#include "control.h"
-#include "icon.h"
-#include "popup.h"
-#include "rgbpanel.h"
-#include "sensors.h"
+#include "ui/tray.h"
+#include "core/config.h"
+#include "core/control.h"
+#include "ui/icon.h"
+#include "ui/popup.h"
+#include "ui/rgbpanel.h"
+#include "core/sensors.h"
 
 #include <QAction>
 #include <QActionGroup>

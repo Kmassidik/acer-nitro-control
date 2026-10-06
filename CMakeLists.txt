@@ -7,19 +7,24 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent)
 
-qt_add_executable(nitro-control
-    src/main.cpp
-    src/config.h
-    src/sensors.h   src/sensors.cpp
-    src/control.h   src/control.cpp
-    src/theme.h     src/theme.cpp
-    src/icon.h      src/icon.cpp
-    src/segmented.h  src/segmented.cpp
-    src/popup.h     src/popup.cpp
-    src/rgbpanel.h  src/rgbpanel.cpp
-    src/tray.h      src/tray.cpp
-    src/selftest.cpp
+qt_add_executable(nitro-control)
+
+# Layered layout: core = engine (no UI), ui = widgets/windows, app = entry.
+target_sources(nitro-control PRIVATE
+    src/app/main.cpp
+    src/app/selftest.cpp
+    src/core/config.h
+    src/core/sensors.h    src/core/sensors.cpp
+    src/core/control.h    src/core/control.cpp
+    src/ui/theme.h        src/ui/theme.cpp
+    src/ui/icon.h         src/ui/icon.cpp
+    src/ui/segmented.h    src/ui/segmented.cpp
+    src/ui/popup.h        src/ui/popup.cpp
+    src/ui/rgbpanel.h     src/ui/rgbpanel.cpp
+    src/ui/tray.h         src/ui/tray.cpp
 )
+
+target_include_directories(nitro-control PRIVATE src)
 
 target_link_libraries(nitro-control PRIVATE Qt6::Widgets Qt6::Concurrent)
 install(TARGETS nitro-control RUNTIME DESTINATION bin)

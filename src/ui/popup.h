@@ -38,7 +38,6 @@ private:
     void applyLevel(const QString &lvl, bool fansAuto);
     void applySelection();
     void applyFans();
-    void scheduleFanWrite();
     void place();
     void toggleMax();
 

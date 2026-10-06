@@ -202,8 +202,7 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_desc->setObjectName("status");
 
     // fan control rows (DAM-style: manual % per fan; auto toggle re-delegates)
-    auto fanRow = [this](const char *name, QSlider *&s, QLabel *&val,
-                         std::function<void(int)> onCommit) {
+    auto fanRow = [this](const char *name, QSlider *&s, QLabel *&val) {
         s = new QSlider(Qt::Horizontal);
         s->setRange(0, 100);
         val = new QLabel("auto");
@@ -216,28 +215,39 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         h->addWidget(b);
         h->addWidget(s, 1);
         h->addWidget(val);
-        // live label while dragging; the WRITE commits on physical release
-        // only — valueChanged fires from programmatic echo too, and each of
-        // those became an EC write (tach→slider→write feedback loop).
+        // label mirrors anywhere; NO write here
         connect(s, &QSlider::valueChanged, this,
                 [this, val](int v) { val->setText(QString("%1%").arg(v)); });
-        connect(s, &QSlider::sliderReleased, this, [this, s, onCommit] {
-            onCommit(s->value());
-        });
         auto *w = new QWidget;
         w->setLayout(h);
         return w;
     };
     m_fanAll = nullptr;
-    auto *allRow = fanRow("All", m_fanAll, m_fanAllVal, [this](int v) {
+    auto *allRow = fanRow("All", m_fanAll, m_fanAllVal);
+    auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal);
+    auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal);
+    // ONE commit rendezvous, written ONCE per physical release of the slider
+    // the user actually touched. Propagation to sibling sliders is silent
+    // (their release-hooks are blockable, so a relayed setValue never
+    // re-commits — the ping-pong chain that pinned manual every 2 s).
+    auto commit = [this](QSlider *src, QSlider *a, QSlider *b2) {
+        const int v = src->value();
         m_programmatic = true;
-        m_fanCpu->setValue(v);
-        m_fanGpu->setValue(v);
+        a->setValue(v);
+        b2->setValue(v);
         m_programmatic = false;
         applyFans();
+    };
+    // wire the single commit to the one slider RELEASED physically:
+    connect(m_fanAll, &QSlider::sliderReleased, this, [this, commit, allRow] (void){
+        commit(m_fanAll, m_fanCpu, m_fanGpu);
     });
-    auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal, [this](int) { applyFans(); });
-    auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal, [this](int) { applyFans(); });
+    connect(m_fanCpu, &QSlider::sliderReleased, this, [this, commit] {
+        commit(m_fanCpu, m_fanAll, m_fanGpu);
+    });
+    connect(m_fanGpu, &QSlider::sliderReleased, this, [this, commit] {
+        commit(m_fanGpu, m_fanAll, m_fanCpu);
+    });
 
     auto *hline = new QFrame(this);
     hline->setObjectName("hline");
@@ -387,9 +397,7 @@ void Popup::refresh()
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;
-        m_programmatic = true;   // setValue() fires valueChanged → CPU/GPU row
-        // handlers call scheduleFanWrite() — without this guard the echo
-        // write-backs re-pin the user's duty EVERY second (the stuck-fan bug)
+        m_programmatic = true;   // silent propagation — no commit relay
         if (!inGrace && !m_fanCpu->isSliderDown() && m_fanCpu->value() != showC)
             m_fanCpu->setValue(showC);
         if (!inGrace && !m_fanGpu->isSliderDown() && m_fanGpu->value() != showG)

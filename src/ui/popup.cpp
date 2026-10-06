@@ -301,16 +301,21 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     fanApply->setCursor(Qt::PointingHandCursor);
     connect(fanApply, &QPushButton::clicked, this, [this] {
         const int c = m_fanCpu->value(), g = m_fanGpu->value();
-        if (c == g && !m_fanAllVal->text().contains('%')) {
-            // fans previously diverged: commit both individually
-            control::setFanPct(c, 0, [this] { refresh(); });
+        m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
+        // CHAIN: write cpu → write gpu → ONE refresh after both state saves
+        // landed. (Firing per-write refreshes let CPU's refresh paint the
+        // pre-GPU state file → sliders snapped back to the old values.)
+        const auto afterCpu = [this, g] {
+            if (g == m_fanCpu->value()) {   // same value → single both-fan write done
+                refresh();
+                return;
+            }
             control::setFanPct(g, 1, [this] { refresh(); });
-        } else if (c == g) {
-            control::setFanPct(c, -1, [this] { refresh(); });   // both at once
-        } else {
-            control::setFanPct(c, 0, [this] { refresh(); });
-            control::setFanPct(g, 1, [this] { refresh(); });
-        }
+        };
+        if (c == g)
+            control::setFanPct(c, -1, [this] { refresh(); });
+        else
+            control::setFanPct(c, 0, afterCpu);
         m_desc->setText(QString("fans: %1% / %2%").arg(c).arg(g));
     });
     lay->addWidget(fanApply);

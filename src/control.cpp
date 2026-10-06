@@ -72,6 +72,39 @@ void setLevelAsync(const QString &key, std::function<void()> instrument)
     }
 }
 
+static void runNbfc(const QStringList &args)
+{
+    QProcess p;
+    p.start(QStringLiteral("nbfc"), args);
+    p.waitForFinished(-1);
+}
+
+void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
+{
+    const int p = qBound(0, pct, 100);
+    auto run = [p, fanIndex, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
+        QStringList args{"set", "-s", QString::number(p)};
+        if (fanIndex >= 0)
+            args << "-f" << QString::number(fanIndex);
+        runNbfc(args);
+        if (ctx)
+            QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+                                      Qt::QueuedConnection);
+    };
+    QThreadPool::globalInstance()->start(std::move(run));
+}
+
+void setFansAuto(std::function<void()> instrument)
+{
+    auto run = [cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
+        runNbfc({QStringLiteral("set"), QStringLiteral("-a")});
+        if (ctx)
+            QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+                                      Qt::QueuedConnection);
+    };
+    QThreadPool::globalInstance()->start(std::move(run));
+}
+
 // ---------------- RGB ----------------
 static const char *DEV_MAIN = "/dev/acer-gkbbl-0";
 static const char *DEV_STATIC = "/dev/acer-gkbbl-static-0";

@@ -7,6 +7,7 @@
 
 class QLabel;
 class QPushButton;
+class QSlider;
 class QTimer;
 class QAbstractButton;
 class QAbstractSlider;
@@ -35,6 +36,8 @@ protected:
 private:
     void applyLevel(const QString &lvl);
     void applySelection();
+    void applyFans();
+    void scheduleFanWrite();
     void place();
     void toggleMax();
 
@@ -50,6 +53,11 @@ private:
     Toggle *m_auto = nullptr;
     QLabel *m_alertRow = nullptr;
     QPushButton *m_closeDot = nullptr, *m_restoreDot = nullptr, *m_rgbDot = nullptr;
+    QSlider *m_fanAll = nullptr, *m_fanCpu = nullptr, *m_fanGpu = nullptr;
+    QLabel *m_fanAllVal = nullptr, *m_fanCpuVal = nullptr, *m_fanGpuVal = nullptr;
+    bool m_programmatic = false;   // suppress slider echoes while syncing UI
+    QTimer *m_fanDebounce = nullptr;   // coalesce slider movement before nbfc write
+    qint64 m_lastFanWriteMs = 0;   // debounce against 1s refresh re-apply
 
     QString m_level = "?";
     QString m_pending;

@@ -18,6 +18,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScreen>
+#include <QSlider>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -187,7 +188,42 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_desc = new QLabel(QString::fromLatin1(cfg::LEVELS[1].sub));
     m_desc->setObjectName("status");
 
-    // rows: auto toggle + alert line
+    // fan control rows (DAM-style: manual % per fan; auto toggle re-delegates)
+    auto fanRow = [this](const char *name, QSlider *&s, QLabel *&val,
+                         std::function<void(int)> onChange) {
+        s = new QSlider(Qt::Horizontal);
+        s->setRange(0, 100);
+        val = new QLabel("auto");
+        val->setObjectName("lab");
+        s->setToolTip("Manual fan duty; auto toggle reverts to the curve");
+        auto *h = new QHBoxLayout;
+        h->setContentsMargins(2, 4, 2, 0);
+        auto *b = new QLabel(name);
+        b->setObjectName("lab");
+        h->addWidget(b);
+        h->addWidget(s, 1);
+        h->addWidget(val);
+        connect(s, &QSlider::valueChanged, this, [this, val, onChange](int v) {
+            val->setText(QString("%1%").arg(v));
+            onChange(v);
+        });
+        auto *w = new QWidget;
+        w->setLayout(h);
+        return w;
+    };
+    m_fanAll = nullptr;
+    auto *allRow = fanRow("All", m_fanAll, m_fanAllVal, [this](int v) {
+        if (m_programmatic)
+            return;
+        m_programmatic = true;
+        m_fanCpu->setValue(v);
+        m_fanGpu->setValue(v);
+        m_programmatic = false;
+        scheduleFanWrite();
+    });
+    auto *cpuRow = fanRow("CPU", m_fanCpu, m_fanCpuVal, [this](int) { scheduleFanWrite(); });
+    auto *gpuRow = fanRow("GPU", m_fanGpu, m_fanGpuVal, [this](int) { scheduleFanWrite(); });
+
     auto *hline = new QFrame(this);
     hline->setObjectName("hline");
     hline->setFixedHeight(1);
@@ -199,12 +235,17 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     m_auto->setToolTip("Auto = thermal guard daemon (drops to Quiet ≥88 °C,\n"
                        "recovers ≤80 °C). Clicking a mode switches back to manual.");
     connect(m_auto, &Toggle::toggled, this, [this](bool on) {
-        m_pending = on ? QStringLiteral("A")
-                       : QLatin1String(cfg::LEVELS[m_seg->current()].key);
-        m_desc->setText(on ? QStringLiteral("applying auto (thermal guard)…")
-                           : QString("applying %1…").arg(
-                                 cfg::LEVELS[m_seg->current()].title));
-        applySelection();
+        if (on) {
+            // guard daemon takes fan control — hand manual nbfc duty back
+            control::setFansAuto([this] { refresh(); });
+            m_pending = QStringLiteral("A");
+            m_desc->setText(QStringLiteral("applying auto (thermal guard)…"));
+            applySelection();
+            return;
+        }
+        // leaving auto: apply current slider duties as manual (DAM engine
+        // semantics), no staged state
+        applyFans();
     });
     row1->addWidget(r1);
     row1->addStretch();
@@ -235,6 +276,9 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     lay->addSpacing(2);
     lay->addWidget(m_desc);
     lay->addSpacing(2);
+    lay->addWidget(allRow);
+    lay->addWidget(cpuRow);
+    lay->addWidget(gpuRow);
     lay->addWidget(hline);
     lay->addWidget(row1w);
     lay->addWidget(row2w);
@@ -294,13 +338,25 @@ void Popup::refresh()
     m_statGpu->setText(QString::number(gpu));
 
     // nbfc `cur` is % of max duty; steps = nominal max RPM. `tgt` is also %.
-    // cur 0 + tgt 0 = deliberate idle stop (or nbfc not reading) — show the
-    // real spin-down rather than a fake number.
     int cRpm = 0, gRpm = 0;
     if (fans.size() >= 2) {
         cRpm = nominalMaxRpm(fans[0]);
         gRpm = nominalMaxRpm(fans[1]);
         m_fansKnown = true;
+        // reflect real duty back into the sliders (echo guard suppresses
+        // writes; sliders show truth even after manual set)
+        const int cpuPct = int(qBound(0.0, fans[0].cur, 100.0));
+        const int gpuPct = int(qBound(0.0, fans[1].cur, 100.0));
+        const int tgtC = int(qBound(0.0, fans[0].tgt, 100.0));
+        const int tgtG = int(qBound(0.0, fans[1].tgt, 100.0));
+        m_programmatic = true;
+        if (!m_fanCpu->isSliderDown() && m_fanCpu->value() != tgtC)
+            m_fanCpu->setValue(tgtC);
+        if (!m_fanGpu->isSliderDown() && m_fanGpu->value() != tgtG)
+            m_fanGpu->setValue(tgtG);
+        m_programmatic = false;
+        m_fanCpuVal->setText(QString("%1%").arg(tgtC));
+        m_fanGpuVal->setText(QString("%1%").arg(tgtG));
     } else {
         m_fansKnown = false;   // nbfc missing → dash, not fake 0
     }
@@ -352,6 +408,32 @@ void Popup::applySelection()
                 break;
             }
     control::setLevelAsync(applied, [this] { refresh(); });
+}
+
+void Popup::scheduleFanWrite()
+{
+    // coalesce 120ms of slider movement into ONE nbfc write
+    if (!m_fanDebounce) {
+        m_fanDebounce = new QTimer(this);
+        m_fanDebounce->setSingleShot(true);
+        m_fanDebounce->setInterval(120);
+        connect(m_fanDebounce, &QTimer::timeout, this, &Popup::applyFans);
+    }
+    m_fanDebounce->start();
+}
+
+void Popup::applyFans()
+{
+    const int cpu = m_fanCpu->value();
+    const int gpu = m_fanGpu->value();
+    if (cpu >= 0 && cpu == gpu)
+        control::setFanPct(cpu, -1, [this] { refresh(); });
+    else {
+        if (cpu >= 0)
+            control::setFanPct(cpu, 0, [this] { refresh(); });
+        if (gpu >= 0)
+            control::setFanPct(gpu, 1, [this] { refresh(); });
+    }
 }
 
 void Popup::place()

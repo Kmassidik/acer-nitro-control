@@ -1,8 +1,8 @@
 # nitro-control (C++ / Qt6)
 
 Native **C++/Qt6** fan, turbo & RGB control for the **Acer Nitro AN515-58** —
-Ghost Terminal KDE system-tray widget, 5 turbo levels + auto thermal guard and
-keyboard RGB panel, in a single ~200 KB binary.
+Glass Ghost KDE system-tray widget, 4 turbo levels + auto thermal guard and
+keyboard RGB panel, in a single ~250 KB binary.
 
 ![popup](docs/screenshot.png)
 ![rgb panel](docs/screenshot-rgb.png)
@@ -20,20 +20,30 @@ in C++/Qt6 with identical features and look:
 
 ## Features
 
-- **5 turbo levels + auto** — `chill / cool / game / fast / max`
+- **4 turbo levels + auto** — `Quiet / Balanced / Boost / Max`
   (governor + EPP + turbo) and `auto` = thermal guard
-  (≥88 °C emergency drop to lvl1, recovers ≤78 °C)
+  (≥88 °C emergency drop, recovers ≤80 °C with a 180 s hold)
 - **System-tray gauge icon** — live temperature ring (HiDPI), color tiers,
   level badge, red pulse while hot
-- **Ghost Terminal popup applet** (left-click) — CPU/GPU temp/RPM terminal bars,
-  6 mode rows + `1-6` / `Esc` keys; plain menu on right-click
-- **Ghost Terminal RGB panel** — 4 zone colors, 6 effects, speed + brightness
+- **Glass Ghost popup** (left-click) — big temp ring, GPU/RPM stats,
+  sliding-pill segmented modes, auto-fan toggle; `1-4` / `A` / `Enter` / `Esc` keys
+- **Glass Ghost RGB panel** — live animated 15×5 keyboard preview, 4 effects,
+  4 zones + 9-color palette + color picker, brightness/speed, link-all-zones
 - **RGB survives reboot & suspend** — saved to
   `~/.config/nitro-control/rgb.json`, re-applied at login
   (`nitro-rgb-restore.service`) and on resume (`system-sleep` hook)
 - **Smooth fan curve** — nbfc custom curve, 7 °C hysteresis, silent at idle
 - **Single instance** — `~/.nitro-tray.lock`, lazy popup/RGB windows,
   timers only while visible/hot
+
+## Security (no stored passwords)
+
+Root work goes through `bin/nitro-priv` — a whitelist helper whose every
+effective branch is a fixed literal. `install.sh` installs three **exact-argv
+NOPASSWD sudoers lines** (thermal on/off + `cpu *` with token re-validation
+inside the helper). No password is stored, echoed or derived anywhere;
+`sudo -n` is used by every caller, so a missing rule fails loudly instead of
+prompting.
 
 ## Build
 
@@ -70,15 +80,15 @@ nitro-control --screenshot popup|rgb|icon FILE   offscreen UI snapshot
 src/
   config.h          tunables: thresholds, level table, paths
   sensors.*         coretemp / nvidia-smi / nbfc readers
-  control.*         read & apply performance level, RGB protocol + state
-  theme.*           Ghost Terminal palette + Qt stylesheet
+  control.*         read & apply performance level (async), RGB protocol + state
+  theme.*           Glass Ghost palette + Qt stylesheet
   icon.*            tray gauge icon (QPainter)
-  levelbutton.*     terminal mode/row button
-  popup.*           Ghost Terminal popup applet (fan control)
-  rgbpanel.*        Ghost Terminal RGB panel
+  segmented.*       sliding-pill segmented control + iOS toggle
+  popup.*           Glass Ghost popup applet (fan control, temp ring)
+  rgbpanel.*        Glass Ghost RGB panel (live keyboard preview)
   tray.*            system-tray icon, menu, hot pulse
   main.cpp          CLI: tray / --restore-rgb / --screenshot
-bin/                turbo-lvl + nitro-thermal-guard helpers
+bin/                turbo-lvl + nitro-priv (root whitelist) + nitro-thermal-guard
 systemd/            user units + system-sleep RGB hook
 nbfc/               fan curve config
 docs/               screenshots
@@ -87,7 +97,8 @@ docs/               screenshots
 ## Customizing
 
 - **Palette / QSS** — `src/theme.cpp`, fonts in `src/config.h`
-- **Level table** — `src/config.h` `LEVELS` (keep `bin/turbo-lvl` in sync!)
+- **Level table** — `src/config.h` `LEVELS` — and keep the token set in
+  `bin/nitro-priv` in sync if you add governor/EPP values
 - **Temps / timing** — `src/config.h` (`HOT_C`, `COOL_C`, `POLL_MS`, `PULSE_MS`)
 - **UI verification** —
   `QT_QPA_PLATFORM=offscreen ./build/nitro-control --screenshot popup /tmp/p.png`

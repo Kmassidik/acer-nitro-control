@@ -15,7 +15,7 @@ public:
 
 private:
     void poll();
-    void pulseTick();
+    void pulseTick();         // icon animation only — no subprocess reads
     void buildMenu();
     void openPopup();
     void openRgb();
@@ -23,8 +23,10 @@ private:
     Popup *m_popup = nullptr;
     RgbPanel *m_rgb = nullptr;
     QMenu *m_menu = nullptr;
-    QVector<QAction *> m_levelActs;
+    QVector<QAction *> m_levelActs;   // 5 acts: 4 manual + auto
     QAction *m_info = nullptr;
     QTimer *m_poll = nullptr, *m_pulse = nullptr;
+    int m_lastCpu = 45;      // cached from poll() — pulseTick reuses it
+    QString m_lastLvl = "?";
     bool m_pulseOn = false;
 };

@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Concurrent)
 
 qt_add_executable(nitro-control
     src/main.cpp
@@ -14,11 +14,11 @@ qt_add_executable(nitro-control
     src/control.h   src/control.cpp
     src/theme.h     src/theme.cpp
     src/icon.h      src/icon.cpp
-    src/levelbutton.h src/levelbutton.cpp
+    src/segmented.h  src/segmented.cpp
     src/popup.h     src/popup.cpp
     src/rgbpanel.h  src/rgbpanel.cpp
     src/tray.h      src/tray.cpp
 )
 
-target_link_libraries(nitro-control PRIVATE Qt6::Widgets)
+target_link_libraries(nitro-control PRIVATE Qt6::Widgets Qt6::Concurrent)
 install(TARGETS nitro-control RUNTIME DESTINATION bin)

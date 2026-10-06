@@ -1,202 +1,350 @@
+// Glass Ghost RGB panel — live animated keyboard preview, 4 zones,
+// effects, palette, brightness/speed, link toggle. Real device writes on Apply.
 #include "rgbpanel.h"
 #include "config.h"
 #include "control.h"
-#include "levelbutton.h"
+#include "segmented.h"
 #include "theme.h"
 
 #include <QAbstractButton>
 #include <QAbstractSlider>
 #include <QColorDialog>
-#include <QGuiApplication>
+#include <QApplication>
+#include <QEvent>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QScreen>
 #include <QSlider>
-#include <QStyle>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWindow>
+#include <cmath>
 
-// ---------------- Swatch ----------------
-Swatch::Swatch(QWidget *parent) : QFrame(parent)
+namespace {
+
+constexpr int KB_COLS = 15;
+constexpr int KB_ROWS = 5;
+
+const struct { const char *k, *t, *s; } FX_MODES[4] = {
+    {"0", "Static", ""}, {"1", "Breathe", ""}, {"2", "Wave", ""}, {"3", "Neon", ""},
+};
+
+// Glass Ghost palette (mock's PAL), hex strings
+const char *PALETTE[] = {
+    "#a78bfa", "#60a5fa", "#22d3ee", "#34d399", "#fbbf24",
+    "#fb923c", "#f472b6", "#f87171", "#f5f5f5",
+};
+
+QString defaultZoneHex(int i)
 {
-    setObjectName("swatch");
-    setCursor(Qt::PointingHandCursor);
-    setColor(QColor("#cba6f7"));
+    static const char *defs[4] = {"#a78bfa", "#60a5fa", "#34d399", "#fbbf24"};
+    return QLatin1String(defs[i]);
 }
 
-void Swatch::setColor(const QColor &c)
+QJsonArray rgbOf(const QColor &c) { return QJsonArray{c.red(), c.green(), c.blue()}; }
+
+QColor zoneColor(const QJsonObject &st, int i)
+{
+    const QJsonArray zones = st["zones"].toArray();
+    if (i < zones.size() && zones[i].isArray()) {
+        const QJsonArray z = zones[i].toArray();
+        if (z.size() >= 3)
+            return QColor(z[0].toInt(), z[1].toInt(), z[2].toInt());
+    }
+    return QColor(defaultZoneHex(i));
+}
+
+// hsv(h in deg) -> rgb ints (same helper as the mock)
+QColor hsv(int h)
+{
+    h = ((h % 360) + 360) % 360;
+    auto f = [&](int n) -> int {
+        const int k = (n + h / 60) % 6;
+        const double v = 1 - std::max(0, std::min(std::min(k, 4 - k), 1));
+        return qRound(255 * v);
+    };
+    return QColor(f(5), f(3), f(1));
+}
+
+} // namespace
+
+// ---------------- Keycap ----------------
+Keycap::Keycap(int row, int col, QWidget *parent)
+    : QWidget(parent), m_row(row), m_col(col)
+{
+    setFixedSize(14, 14);
+    setCursor(Qt::PointingHandCursor);
+}
+
+void Keycap::setRgb(const QColor &c, double glow)
 {
     m_c = c;
-    setStyleSheet(QString("background: %1; border-radius: 6px;"
-                          "border: 1px solid rgba(255,255,255,0.14);")
-                      .arg(c.name()));
+    m_glow = glow;
+    update();
 }
 
-void Swatch::mousePressEvent(QMouseEvent *ev)
+void Keycap::paintEvent(QPaintEvent *)
+{
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(m_c);
+    p.drawRoundedRect(rect(), 3, 3);
+    if (m_glow > 0.05) {
+        p.setPen(QPen(QColor(255, 255, 255, int(255 * 0.4 * m_glow)), 1.5));
+        p.setBrush(Qt::NoBrush);
+        p.drawRoundedRect(rect(), 3, 3);
+    }
+}
+
+void Keycap::mousePressEvent(QMouseEvent *ev)
 {
     if (ev->button() == Qt::LeftButton)
-        emit clicked();
-    QFrame::mousePressEvent(ev);
+        emit picked(m_row, m_col);
+    QWidget::mousePressEvent(ev);
 }
 
 // ---------------- RgbPanel ----------------
-static const struct { const char *k, *t, *s; } MODES[6] = {
-    {"0", "Static", "zones"}, {"1", "Breath", "pulse"}, {"2", "Neon", "cycle"},
-    {"3", "Wave", "flow"},    {"4", "Shift", "glide"},  {"5", "Zoom", "zoom"},
-};
-
-static QFrame *makeHLine(QWidget *parent)
-{
-    auto *ln = new QFrame(parent);
-    ln->setFrameShape(QFrame::HLine);
-    ln->setFixedHeight(1);
-    ln->setStyleSheet("background: rgba(255,255,255,0.06); border: none;");
-    return ln;
-}
-
-bool isInteractiveControl(QObject *o)
-{
-    for (; o; o = o->parent()) {
-        if (const auto *w = qobject_cast<const QWidget *>(o)) {
-            if (qobject_cast<const QAbstractButton *>(w) ||
-                qobject_cast<const QAbstractSlider *>(w) ||
-                w->objectName() == "lvlBtn" ||
-                w->objectName() == "swatch")
-                return true;
-        }
-    }
-    return false;
-}
-
 RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
-    : QWidget(parent, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool), m_openPopup(std::move(openPopup))
+    : QWidget(parent, Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool),
+      m_openPopup(std::move(openPopup))
 {
     setAttribute(Qt::WA_TranslucentBackground, true);
     setStyleSheet(theme::stylesheet());
-    setMinimumWidth(360);
+    setMinimumWidth(356);
 
     auto *panel = new QFrame(this);
     panel->setObjectName("panel");
+    auto *lay = new QVBoxLayout(panel);
+    lay->setContentsMargins(22, 10, 22, 22);
+    lay->setSpacing(6);
 
-    auto *controls = new QHBoxLayout;
-    controls->addStretch();
-    auto *min = new QPushButton("–");
-    min->setObjectName("x");
-    auto *max = new QPushButton("□");
-    max->setObjectName("x");
-    auto *close = new QPushButton("×");
-    close->setObjectName("x");
-    connect(min, &QPushButton::clicked, this, &QWidget::showMinimized);
-    connect(max, &QPushButton::clicked, this, &RgbPanel::toggleMax);
-    connect(close, &QPushButton::clicked, this, &QWidget::hide);
-    controls->addWidget(min);
-    controls->addWidget(max);
-    controls->addWidget(close);
+    // titlebar dots
+    auto *dots = new QHBoxLayout;
+    dots->setSpacing(6);
+    auto mkDot = [this](std::function<void()> act) {
+        auto *d = new QPushButton(this);
+        d->setObjectName("dotBtn");
+        d->setFixedSize(10, 10);
+        d->setCursor(Qt::PointingHandCursor);
+        connect(d, &QPushButton::clicked, this, act);
+        return d;
+    };
+    dots->addWidget(mkDot([this] { hide(); }));
+    dots->addWidget(mkDot([this] {
+        setGeometry(m_normalGeo);
+        m_maximized = false;
+    }));
+    dots->addSpacing(18);
+    auto *ttl = new QLabel("Keyboard RGB");
+    ttl->setObjectName("ttlc");
+    ttl->setAlignment(Qt::AlignCenter);
+    dots->addWidget(ttl, 1);
+    dots->addSpacing(26);
+    dots->addWidget(mkDot([this] {
+        if (m_openPopup)
+            m_openPopup();
+    }));
 
-    // zones + sync
-    auto *zrow = new QHBoxLayout;
-    zrow->setSpacing(6);
-    for (int i = 0; i < 4; ++i) {
-        auto *wrap = new QVBoxLayout;
-        wrap->setSpacing(2);
-        m_zones[i] = new Swatch;
-        connect(m_zones[i], &Swatch::clicked, this, [this, i] { pickZone(i); });
-        auto *lbl = new QLabel(QString("Z%1").arg(i + 1));
-        lbl->setObjectName("swLbl");
-        lbl->setAlignment(Qt::AlignCenter);
-        wrap->addWidget(m_zones[i]);
-        wrap->addWidget(lbl);
-        zrow->addLayout(wrap);
-    }
-    m_sync = new QPushButton("Sync");
-    m_sync->setObjectName("chipBtn");
-    m_sync->setCheckable(true);
-    connect(m_sync, &QPushButton::toggled, this, [this](bool on) {
-        if (on) {
-            const QJsonArray z0 = m_state["zones"].toArray();
-            QJsonArray zones;
-            for (int i = 0; i < 4; ++i)
-                zones.append(z0.isEmpty() ? QJsonArray{217, 168, 98} : z0[0]);
-            m_state["zones"] = zones;
-            for (auto *z : m_zones)
-                z->setColor(QColor(z0.isEmpty() ? QColor("#cba6f7").name()
-                                                : QColor(z0[0].toArray()[0].toInt(),
-                                                         z0[0].toArray()[1].toInt(),
-                                                         z0[0].toArray()[2].toInt()).name()));
+    // keyboard preview
+    m_kb = new QWidget;
+    m_kb->setObjectName("kb");
+    auto *kgrid = new QGridLayout(m_kb);
+    kgrid->setContentsMargins(10, 10, 10, 10);
+    kgrid->setSpacing(3);
+    m_keys.resize(KB_ROWS);
+    for (int r = 0; r < KB_ROWS; ++r) {
+        m_keys[r].reserve(KB_COLS);
+        for (int c = 0; c < KB_COLS; ++c) {
+            auto *k = new Keycap(r, c, m_kb);
+            k->setZone(int(double(c) / KB_COLS * 4));   // := mock mapping
+            connect(k, &Keycap::picked, this, [this](int row, int col) {
+                selectZone(m_keys[row][col]->zone());
+            });
+            kgrid->addWidget(k, r, c);
+            m_keys[r].append(k);
         }
-    });
-    zrow->addWidget(m_sync, 0, Qt::AlignBottom);
-
-    // fx color
-    auto *frow = new QHBoxLayout;
-    auto *flbl = new QLabel("FX color");
-    flbl->setObjectName("swLbl");
-    m_fx = new Swatch;
-    connect(m_fx, &Swatch::clicked, this, &RgbPanel::pickFx);
-    frow->addWidget(flbl);
-    frow->addWidget(m_fx);
-    frow->addStretch();
-
-    // modes list
-    auto *modes = new QVBoxLayout;
-    modes->setSpacing(2);
-    for (int i = 0; i < 6; ++i) {
-        auto *b = new LevelButton(MODES[i].t, MODES[i].t, MODES[i].s);
-        connect(b, &LevelButton::clicked, this, [this](const QString &title) {
-            const QString modeKey = title;
-            for (int j = 0; j < 6; ++j)
-                if (QString::fromLatin1(MODES[j].t) == modeKey)
-                    m_state["mode"] = j;
-            for (auto it = m_modes.begin(); it != m_modes.end(); ++it)
-                it.value()->setActive(it.key() == modeKey);
-            m_status->setText(QString("mode=%1").arg(modeKey));
-        });
-        m_modes[QString(MODES[i].t)] = b;
-        modes->addWidget(b);
     }
 
-    // sliders
-    auto sliderRow = [this](const char *name, QSlider *&s, QLabel *&val,
-                            int lo, int hi) {
-        auto *row = new QHBoxLayout;
-        row->setSpacing(8);
-        auto *lbl = new QLabel(name);
-        lbl->setObjectName("sect");
+    // effects segmented
+    m_fx = new Segmented;
+    QStringList fxLabels;
+    for (const auto &m : FX_MODES)
+        fxLabels << m.t;
+    m_fx->setOptions(fxLabels);
+    m_fx->setPillColor(QColor(255, 255, 255, 28));
+    m_fx->setAccentColor(Qt::white);
+    connect(m_fx, &Segmented::selected, this, [this](int idx) {
+        m_state["mode"] = idx;
+        syncUiFromState();
+    });
+
+    // zone row
+    auto *zlab = new QLabel("ZONE");
+    zlab->setObjectName("lab");
+    m_zoneLbl = new QLabel("Zone 1");
+    m_zoneLbl->setObjectName("lab");
+    auto *zrow = new QHBoxLayout;
+    zrow->addWidget(zlab);
+    zrow->addStretch();
+    zrow->addWidget(m_zoneLbl);
+    auto *zones = new QHBoxLayout;
+    zones->setSpacing(8);
+    for (int i = 0; i < 4; ++i) {
+        auto *b = new QPushButton;
+        b->setObjectName("zone");
+        b->setProperty("sel", i == 0);
+        b->setText(QString::number(i + 1));
+        b->setFixedHeight(38);
+        b->setCursor(Qt::PointingHandCursor);
+        connect(b, &QPushButton::clicked, this, [this, i] { selectZone(i); });
+        m_zones.append(b);
+        zones->addWidget(b, 1);
+    }
+
+    // palette row
+    auto *pal = new QHBoxLayout;
+    pal->setSpacing(4);
+    for (const char *hex : PALETTE) {
+        auto *b = new QPushButton;
+        b->setObjectName("palBtn");
+        b->setStyleSheet(QString("background: %1;").arg(hex));
+        b->setCursor(Qt::PointingHandCursor);
+        const QColor c(hex);
+        connect(b, &QPushButton::clicked, this, [this, c] {
+            if (m_link->isChecked())
+                for (int i = 0; i < 4; ++i) {
+                    m_state["zones"] = QJsonArray{};
+                    QJsonArray zones = m_state["zones"].toArray();
+                    zones.append(rgbOf(c));
+                    m_state["zones"] = zones;
+                    m_zones[i]->setStyleSheet(
+                        m_zones[i]->styleSheet().replace(
+                            QRegularExpression("background:[^;]+"),
+                            QString("background: %1").arg(c.name())));
+                }
+            else {
+                QJsonArray zones = m_state["zones"].toArray();
+                while (zones.size() < 4)
+                    zones.append(rgbOf(QColor(defaultZoneHex(zones.size()))));
+                zones[m_selZone] = rgbOf(c);
+                m_state["zones"] = zones;
+            }
+            syncUiFromState();
+            apply();
+        });
+        m_palBtns.append(b);
+        pal->addWidget(b);
+    }
+    pal->addStretch();
+
+    // custom pick button appended to palette
+    auto *pick = new QPushButton("+");
+    pick->setObjectName("palBtn");
+    pick->setStyleSheet("background: rgba(255,255,255,0.08); color: #e8e6f5;");
+    pick->setCursor(Qt::PointingHandCursor);
+    connect(pick, &QPushButton::clicked, this, [this] {
+        const QColor c = QColorDialog::getColor(
+            zoneColor(m_state, m_selZone), this, "Zone color");
+        if (!c.isValid())
+            return;
+        QJsonArray zones = m_state["zones"].toArray();
+        while (zones.size() < 4)
+            zones.append(rgbOf(QColor(defaultZoneHex(zones.size()))));
+        if (m_link->isChecked()) {
+            for (int i = 0; i < 4; ++i)
+                zones[i] = rgbOf(c);
+        } else {
+            zones[m_selZone] = rgbOf(c);
+        }
+        m_state["zones"] = zones;
+        syncUiFromState();
+        apply();
+    });
+    pal->addWidget(pick);
+
+    // brightness + speed
+    auto mkSlider = [this](const char *labelTxt, QSlider *&s, QLabel *&val,
+                           int lo, int hi, const char *stateKey) {
+        auto *lab = new QLabel(labelTxt);
+        lab->setObjectName("lab");
+        val = new QLabel;
+        val->setObjectName("lab");
         s = new QSlider(Qt::Horizontal);
         s->setRange(lo, hi);
-        val = new QLabel;
-        val->setObjectName("sliderVal");
-        connect(s, &QSlider::valueChanged, val,
-                [val](int v) { val->setText(QString::number(v)); });
-        row->addWidget(lbl);
-        row->addWidget(s, 1);
-        row->addWidget(val);
-        return row;
+        connect(s, &QSlider::valueChanged, this, [this, val, stateKey](int v) {
+            val->setText(QString("%1%").arg(v));
+            m_state[stateKey] = v;
+            paintKeyboard();
+        });
+        auto *h = new QHBoxLayout;
+        h->addWidget(lab);
+        h->addStretch();
+        h->addWidget(val);
+        auto *box = new QWidget;
+        auto *v = new QVBoxLayout(box);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(0);
+        v->addLayout(h);
+        v->addWidget(s);
+        return box;
     };
-    auto *speedRow = sliderRow("Speed", m_speed, m_speedVal, 1, 9);
-    auto *brightRow = sliderRow("Brightness", m_bright, m_brightVal, 0, 100);
+    auto *brightBox = mkSlider("BRIGHTNESS", m_bright, m_brightVal, 0, 100, "brightness");
+    auto *speedBox = mkSlider("SPEED", m_speed, m_speedVal, 5, 100, "speed");
 
-    // apply + status
+    // link + apply
+    auto *hline2 = new QFrame(this);
+    hline2->setObjectName("hline");
+    hline2->setFixedHeight(1);
+    auto *rowL = new QHBoxLayout;
+    rowL->setContentsMargins(2, 9, 2, 9);
+    auto *rl = new QLabel("Link all zones");
+    rl->setObjectName("row");
+    m_link = new Toggle;
+    connect(m_link, &Toggle::toggled, this, [this](bool on) {
+        m_state["sync"] = on;
+        if (on) {
+            QJsonArray zones;
+            for (int i = 0; i < 4; ++i)
+                zones.append(rgbOf(zoneColor(m_state, m_selZone)));
+            m_state["zones"] = zones;
+        }
+        syncUiFromState();
+    });
+    rowL->addWidget(rl);
+    rowL->addStretch();
+    rowL->addWidget(m_link);
+    auto *rowLw = new QWidget;
+    rowLw->setLayout(rowL);
+
     auto *applyBtn = new QPushButton("Apply");
     applyBtn->setObjectName("applyBtn");
+    applyBtn->setCursor(Qt::PointingHandCursor);
     connect(applyBtn, &QPushButton::clicked, this, &RgbPanel::apply);
     m_status = new QLabel("ready");
     m_status->setObjectName("status");
-    m_status->setTextFormat(Qt::RichText);
-    m_status->setText("<span style='color:#6c7086'>ready</span>");
 
-    auto *lay = new QVBoxLayout(panel);
-    lay->setContentsMargins(12, 10, 12, 12);
-    lay->setSpacing(10);
-    lay->addLayout(controls);
+    lay->addLayout(dots);
+    lay->addSpacing(4);
+    lay->addWidget(m_kb);
+    lay->addSpacing(4);
+    lay->addWidget(m_fx);
+    lay->addSpacing(4);
     lay->addLayout(zrow);
-    lay->addLayout(frow);
-    lay->addLayout(modes);
-    lay->addLayout(speedRow);
-    lay->addLayout(brightRow);
+    lay->addLayout(zones);
+    lay->addSpacing(2);
+    lay->addLayout(pal);
+    lay->addSpacing(6);
+    lay->addWidget(brightBox);
+    lay->addWidget(speedBox);
+    lay->addWidget(hline2);
+    lay->addWidget(rowLw);
+    lay->addSpacing(4);
     lay->addWidget(applyBtn);
     lay->addWidget(m_status);
 
@@ -204,31 +352,136 @@ RgbPanel::RgbPanel(QWidget *parent, std::function<void()> openPopup)
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addWidget(panel);
 
-    // Drag from any non-interactive area (labels/background), not from
-    // buttons, sliders, swatches or mode rows.
+    // effect animation — only while visible
+    m_paintTimer = new QTimer(this);
+    m_paintTimer->setInterval(50);
+    connect(m_paintTimer, &QTimer::timeout, this, [this] {
+        m_t += 0.05 * (0.3 + m_state["speed"].toInt() / 100.0 * 2.2);
+        paintKeyboard();
+    });
+    m_paintTimer->start();
+
+    // drag from non-interactive areas
     for (QWidget *child : findChildren<QWidget *>())
         child->installEventFilter(this);
     installEventFilter(this);
 }
 
+void RgbPanel::showEvent(QShowEvent *ev)
+{
+    m_state = control::loadRgb();
+    loadUi();
+    m_paintTimer->start();
+    QWidget::showEvent(ev);
+}
+
+void RgbPanel::hideEvent(QHideEvent *ev)
+{
+    m_paintTimer->stop();
+    QWidget::hideEvent(ev);
+}
+
+void RgbPanel::loadUi()
+{
+    syncUiFromState();
+}
+
+void RgbPanel::syncUiFromState()
+{
+    const int mode = m_state["mode"].toInt(0);
+    m_fx->select(qBound(0, mode, 3), false);
+
+    for (int i = 0; i < 4; ++i) {
+        const QColor c = zoneColor(m_state, i);
+        m_zones[i]->setStyleSheet(
+            QString("background: %1;").arg(c.name()));
+        m_zones[i]->setProperty("sel", i == m_selZone);
+    }
+    m_zoneLbl->setText(QString("Zone %1").arg(m_selZone + 1));
+
+    m_bright->setValue(m_state["brightness"].toInt(80));
+    m_speed->setValue(qBound(5, m_state["speed"].toInt(50), 100));
+    m_brightVal->setText(QString("%1%").arg(m_bright->value()));
+    m_speedVal->setText(QString("%1%").arg(m_speed->value()));
+    m_link->setChecked(m_state["sync"].toBool());
+
+    paintKeyboard();
+}
+
+void RgbPanel::selectZone(int idx)
+{
+    m_selZone = qBound(0, idx, 3);
+    syncUiFromState();
+}
+
+void RgbPanel::paintKeyboard()
+{
+    const int mode = m_state["mode"].toInt(0);
+    const double bri = m_bright->value() / 100.0;
+    const QJsonArray zones = m_state["zones"].toArray();
+    QColor zcol[4];
+    for (int i = 0; i < 4; ++i)
+        zcol[i] = (i < zones.size()) ? zoneColor(m_state, i)
+                                      : QColor(defaultZoneHex(i));
+
+    for (int r = 0; r < KB_ROWS; ++r) {
+        for (int c = 0; c < KB_COLS; ++c) {
+            auto *k = m_keys[r][c];
+            const int z = k->zone();
+            QColor col = zcol[z];
+            double f = 1.0;
+            if (mode == 1)          // Breathe
+                f = 0.3 + 0.7 * (0.5 + 0.5 * std::sin(m_t * 2));
+            else if (mode == 2)     // Wave
+                f = 0.15 + 0.85 * (0.5 + 0.5 * std::sin(c * 0.55 - m_t * 4));
+            else if (mode == 3)     // Neon
+                col = hsv(m_t * 40 + z * 70 + c * 6);
+            const double v = 0.1 + 0.9 * f * bri;
+            QColor out(qRound(col.red() * v + 12 * (1 - v)),
+                       qRound(col.green() * v + 12 * (1 - v)),
+                       qRound(col.blue() * v + 12 * (1 - v)));
+            k->setRgb(out, (bri > 0.05 && f > 0.5) ? f * bri : 0.0);
+        }
+    }
+    // window glow tint follows the selected zone (mock --glow)
+    setProperty("glowColor", zcol[m_selZone].name());
+}
+
+void RgbPanel::apply()
+{
+    m_state["brightness"] = m_bright->value();
+    m_state["speed"] = m_speed->value();
+    m_state["sync"] = m_link->isChecked();
+    m_state["mode"] = m_fx->current();
+    QString err;
+    const bool ok = control::applyRgb(m_state, &err);
+    m_status->setText(ok ? "✓ applied" : "✗ " + err);
+}
+
+// drag helpers (same strategy as Popup)
 bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
 {
     const QEvent::Type type = event->type();
-    if (!m_maximized && (type == QEvent::MouseButtonPress ||
-                         type == QEvent::MouseMove ||
-                         type == QEvent::MouseButtonRelease)) {
+    if (type == QEvent::MouseButtonPress || type == QEvent::MouseMove ||
+        type == QEvent::MouseButtonRelease) {
         auto *me = static_cast<QMouseEvent *>(event);
-        if (!isInteractiveControl(watched)) {
-            if (type == QEvent::MouseButtonPress && me->button() == Qt::LeftButton) {
-                if (QWindow *h = windowHandle()) {
+        auto *w = qobject_cast<QWidget *>(watched);
+        const bool interactive = w && (qobject_cast<QAbstractButton *>(w) ||
+                                       qobject_cast<QAbstractSlider *>(w));
+        if (!interactive) {
+            if (type == QEvent::MouseButtonPress &&
+                me->button() == Qt::LeftButton) {
+                if (QWindow *h = windowHandle())
                     h->startSystemMove();
-                } else {
+                else {
                     m_dragging = true;
-                    m_dragPos = me->globalPosition().toPoint() - frameGeometry().topLeft();
+                    m_dragPos = me->globalPosition().toPoint() -
+                                frameGeometry().topLeft();
                 }
                 return false;
             }
-            if (type == QEvent::MouseMove && m_dragging && (me->buttons() & Qt::LeftButton)) {
+            if (type == QEvent::MouseMove && m_dragging &&
+                (me->buttons() & Qt::LeftButton)) {
                 move(me->globalPosition().toPoint() - m_dragPos);
                 return true;
             }
@@ -241,27 +494,12 @@ bool RgbPanel::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
-void RgbPanel::toggleMax()
-{
-    if (m_maximized) {
-        setGeometry(m_normalGeo);
-        m_maximized = false;
-    } else {
-        m_normalGeo = geometry();
-        QScreen *screen = nullptr;
-        for (QScreen *s : qApp->screens())
-            if (s->availableGeometry().contains(geometry().center())) { screen = s; break; }
-        if (!screen) screen = QGuiApplication::primaryScreen();
-        setGeometry(screen->availableGeometry());
-        m_maximized = true;
-    }
-}
-
 void RgbPanel::mousePressEvent(QMouseEvent *ev)
 {
     if (ev->button() == Qt::LeftButton) {
         m_dragging = true;
-        m_dragPos = ev->globalPosition().toPoint() - frameGeometry().topLeft();
+        m_dragPos = ev->globalPosition().toPoint() -
+                    frameGeometry().topLeft();
     }
     QWidget::mousePressEvent(ev);
 }
@@ -277,73 +515,4 @@ void RgbPanel::mouseReleaseEvent(QMouseEvent *ev)
 {
     m_dragging = false;
     QWidget::mouseReleaseEvent(ev);
-}
-
-void RgbPanel::showEvent(QShowEvent *ev)
-{
-    m_state = control::loadRgb();
-    loadUi();
-    QWidget::showEvent(ev);
-}
-
-void RgbPanel::loadUi()
-{
-    const QJsonArray zones = m_state["zones"].toArray();
-    for (int i = 0; i < 4; ++i) {
-        const QJsonArray z = (i < zones.size() && zones[i].isArray())
-                                 ? zones[i].toArray() : QJsonArray{217, 168, 98};
-        m_zones[i]->setColor(QColor(z[0].toInt(217), z[1].toInt(168), z[2].toInt(98)));
-    }
-    const QJsonArray c = m_state["color"].isArray()
-                             ? m_state["color"].toArray() : QJsonArray{217, 168, 98};
-    m_fx->setColor(QColor(c[0].toInt(217), c[1].toInt(168), c[2].toInt(98)));
-    m_sync->setChecked(m_state["sync"].toBool());
-    const int mode = m_state["mode"].toInt(1);
-    for (auto it = m_modes.begin(); it != m_modes.end(); ++it)
-        it.value()->setActive(it.key().toInt() == mode || it.key() == QString::fromLatin1(MODES[mode].t));
-    m_speed->setValue(m_state["speed"].toInt(4));
-    m_bright->setValue(m_state["brightness"].toInt(100));
-    m_speedVal->setText(QString::number(m_speed->value()));
-    m_brightVal->setText(QString::number(m_bright->value()));
-}
-
-void RgbPanel::pickZone(int idx)
-{
-    const QColor c = QColorDialog::getColor(m_zones[idx]->color(), this,
-                                            QString("Zone %1").arg(idx + 1));
-    if (!c.isValid())
-        return;
-    QJsonArray zones = m_state["zones"].toArray();
-    while (zones.size() < 4)
-        zones.append(QJsonArray{217, 168, 98});
-    const QJsonArray rgb{c.red(), c.green(), c.blue()};
-    if (m_sync->isChecked()) {
-        for (int i = 0; i < 4; ++i) {
-            zones[i] = rgb;
-            m_zones[i]->setColor(c);
-        }
-    } else {
-        zones[idx] = rgb;
-        m_zones[idx]->setColor(c);
-    }
-    m_state["zones"] = zones;
-}
-
-void RgbPanel::pickFx()
-{
-    const QColor c = QColorDialog::getColor(m_fx->color(), this, "FX color");
-    if (!c.isValid())
-        return;
-    m_state["color"] = QJsonArray{c.red(), c.green(), c.blue()};
-    m_fx->setColor(c);
-}
-
-void RgbPanel::apply()
-{
-    m_state["speed"] = m_speed->value();
-    m_state["brightness"] = m_bright->value();
-    m_state["sync"] = m_sync->isChecked();
-    QString err;
-    const bool ok = control::applyRgb(m_state, &err);
-    m_status->setText(ok ? "✓ applied" : "✗ " + err);
 }

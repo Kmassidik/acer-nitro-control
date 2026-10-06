@@ -1,5 +1,4 @@
 #pragma once
-#include <QHash>
 #include <QPoint>
 #include <QRect>
 #include <QSystemTrayIcon>
@@ -9,8 +8,12 @@
 class QLabel;
 class QPushButton;
 class QTimer;
-class LevelButton;
+class QAbstractButton;
+class QAbstractSlider;
 class QMouseEvent;
+class Segmented;
+class Toggle;
+class TempRing;
 
 class Popup : public QWidget
 {
@@ -30,32 +33,31 @@ protected:
     void mouseReleaseEvent(QMouseEvent *ev) override;
 
 private:
+    void applyLevel(const QString &lvl);
+    void applySelection();
     void place();
-    void updateBlocks();
-    void updateModeUi(const QString &liveLevel);
     void toggleMax();
 
-    QSystemTrayIcon *m_tray;
+    QSystemTrayIcon *m_tray = nullptr;
     std::function<void()> m_openRgb;
-    QLabel *m_cpuBlock, *m_gpuBlock;
-    QPushButton *m_applyBtn = nullptr;
-    QLabel *m_modeStatus = nullptr;
-    QHash<QString, LevelButton *> m_btns;
-    QTimer *m_timer;
-    QTimer *m_anim;
+
+    TempRing *m_ring = nullptr;
+    QLabel *m_statGpu = nullptr;
+    QLabel *m_statFanC = nullptr;
+    QLabel *m_statFanG = nullptr;
+    Segmented *m_seg = nullptr;
+    QLabel *m_desc = nullptr;
+    Toggle *m_auto = nullptr;
+    QLabel *m_alertRow = nullptr;
 
     QString m_level = "?";
-    QString m_pendingLevel;
-    int m_cpuTempVal = 0, m_gpuTempVal = 0;
+    QString m_pending;
+    int m_targetCpuRpm = 0, m_targetGpuRpm = 0;   // real, from nbfc
+    int m_uiCpuRpm = 0, m_uiGpuRpm = 0;           // smoothed for display
     bool m_dragging = false;
     QPoint m_dragPos;
     bool m_maximized = false;
     QRect m_normalGeo;
-    int m_targetCpuRpm = 0;
-    int m_targetGpuRpm = 0;
-    int m_uiCpuRpm = 0;
-    int m_uiGpuRpm = 0;
-    double m_cpuPhase = 0;
-    double m_gpuPhase = 0;
-    bool m_barLineRed = false;
+    QTimer *m_timer = nullptr;   // refresh (only while visible)
+    QTimer *m_anim = nullptr;    // rpm easing (only while visible)
 };

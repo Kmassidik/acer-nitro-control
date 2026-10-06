@@ -21,7 +21,6 @@ Tray::Tray(QObject *parent) : QSystemTrayIcon(parent)
     m_poll = new QTimer(this);
     m_poll->setInterval(cfg::POLL_MS);
     connect(m_poll, &QTimer::timeout, this, &Tray::poll);
-    m_poll->start();
 
     m_pulse = new QTimer(this);
     m_pulse->setInterval(cfg::PULSE_MS);
@@ -33,6 +32,7 @@ Tray::Tray(QObject *parent) : QSystemTrayIcon(parent)
                     openPopup();
             });
     poll();
+    m_poll->start();
     show();   // registers the StatusNotifierItem with the watcher — without
               // this Qt never exports the icon and nothing shows in the tray
 }
@@ -43,15 +43,21 @@ void Tray::buildMenu()
     auto *group = new QActionGroup(m_menu);
     group->setExclusive(true);
     for (const auto &lv : cfg::LEVELS) {
-        auto *act = group->addAction(QString::fromLatin1(lv.menu));
+        auto *act = group->addAction(
+            QString("lvl%1  %2 (%3)").arg(lv.key, lv.title, lv.sub));
         act->setCheckable(true);
         act->setData(QString::fromLatin1(lv.key));
-        connect(act, &QAction::triggered, this, [this, act] {
-            control::setLevel(act->data().toString());
-            poll();
-        });
         m_levelActs.append(act);
     }
+    auto *autoAct = group->addAction("auto  (thermal guard)");
+    autoAct->setCheckable(true);
+    autoAct->setData("A");
+    m_levelActs.append(autoAct);
+    for (auto *act : m_levelActs)
+        connect(act, &QAction::triggered, this, [this, act] {
+            control::setLevelAsync(act->data().toString(),
+                                   [this] { QTimer::singleShot(300, this, &Tray::poll); });
+        });
     m_menu->addSeparator();
     m_info = m_menu->addAction("—");
     m_info->setEnabled(false);
@@ -89,13 +95,15 @@ void Tray::openRgb()
 
 void Tray::poll()
 {
-    const auto temps = sensors::readTemps();
-    const int cpu = temps.first, gpu = temps.second;
+    const auto [cpu, gpu] = sensors::readTemps();
     const QString lvl = control::readLevel();
+    m_lastCpu = cpu;
+    m_lastLvl = lvl;
 
     int lvlIdx = -1;
-    for (int i = 0; i < 6; ++i)
-        if (lvl == QLatin1String(cfg::LEVELS[i].key))
+    const QString key = (lvl == "5") ? "4" : lvl;   // legacy 5-level key map
+    for (int i = 0; i < m_levelActs.size(); ++i)
+        if (key == m_levelActs[i]->data().toString())
             lvlIdx = i;
     for (int i = 0; i < m_levelActs.size(); ++i)
         if (m_levelActs[i]->isChecked() != (i == lvlIdx))
@@ -103,23 +111,29 @@ void Tray::poll()
     m_info->setText(QString("CPU %1°C · GPU %2°C").arg(cpu).arg(gpu));
 
     const int mx = qMax(cpu, gpu);
-    if (mx >= cfg::HOT_C && !m_pulse->isActive())
+    if (mx >= cfg::HOT_C && !m_pulse->isActive()) {
         m_pulse->start();
-    if (mx <= cfg::COOL_C && m_pulse->isActive()) {
+    } else if (mx <= cfg::COOL_C && m_pulse->isActive()) {
         m_pulse->stop();
         m_pulseOn = false;
+        setIcon(icon::makeIcon(cpu, key, false));
+        setToolTip(QString("Nitro Control — CPU %1°C · GPU %2°C · %3")
+                       .arg(cpu).arg(gpu)
+                       .arg(lvl == "A" ? "auto" : lvl));
+        return;
     }
-    setIcon(icon::makeIcon(cpu, lvl == QLatin1String("?") ? "?" : lvl, m_pulseOn));
+    setIcon(icon::makeIcon(cpu, key == "?" ? "?" : key, m_pulseOn));
     setToolTip(QString("Nitro Control — CPU %1°C · GPU %2°C · %3")
                    .arg(cpu).arg(gpu)
-                   .arg(lvl == QLatin1String("A") ? "auto" : lvl));
+                   .arg(lvl == "A" ? "auto" : lvl));
 }
 
 void Tray::pulseTick()
 {
     m_pulseOn = !m_pulseOn;
-    const auto temps = sensors::readTemps();
-    const QString lvl = control::readLevel();
-    setIcon(icon::makeIcon(temps.first,
-                           lvl == QLatin1String("?") ? "?" : lvl, m_pulseOn));
+    // reuse cached temp/level from poll() — no subprocess reads per pulse
+    setIcon(icon::makeIcon(m_lastCpu,
+                           m_lastLvl == "5" ? "4"
+                                              : (m_lastLvl == "A" ? "A" : m_lastLvl),
+                           m_pulseOn));
 }

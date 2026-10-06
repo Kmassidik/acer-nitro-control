@@ -7,7 +7,10 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QCoreApplication>
 #include <QThread>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QThreadPool>
 #include <chrono>
 
 namespace control {
@@ -34,8 +37,6 @@ QString readLevel()
         return "A";
 
     for (const auto &lv : cfg::LEVELS) {
-        if (*lv.gov == '\0')
-            continue;
         if (gov == lv.gov && epp == lv.epp && turbo == lv.turbo)
             return lv.key;
     }
@@ -44,9 +45,31 @@ QString readLevel()
 
 void setLevel(const QString &key)
 {
+    // "1".."4" manual (old "1".."5" keys collapse to the 4-segment UI),
+    // "A" = auto thermal guard.
+    const QString arg = (key == "A" || key == "auto")
+                            ? QStringLiteral("auto")
+                            : (key == "5" ? QStringLiteral("4") : key);
     QProcess p;
-    p.start(cfg::TURBO_LVL, {key == "A" ? QStringLiteral("auto") : key});
-    p.waitForFinished(30000);
+    p.start(cfg::TURBO_LVL, {arg});
+    p.waitForFinished(-1);
+}
+
+void setLevelAsync(const QString &key, std::function<void()> instrument)
+{
+    // Runs turbo-lvl on a worker thread; QMetaObject::invokeMethod hops the
+    // instrument callback back to the caller's (GUI) thread event loop.
+    if (auto *ctx = QCoreApplication::instance()) {
+        QThreadPool::globalInstance()->start(
+            [ctx, key, cb = std::move(instrument)]() mutable {
+                setLevel(key);
+                QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+                                          Qt::QueuedConnection);
+            });
+    } else {
+        setLevel(key);
+        if (instrument) instrument();
+    }
 }
 
 // ---------------- RGB ----------------
@@ -85,14 +108,8 @@ QJsonObject loadRgb(const QString &path)
     return defaultRgb();
 }
 
-static bool waitDevices(int timeoutMs = 2500)
+static bool devicesPresent()
 {
-    const int step = 400;
-    for (int waited = 0; waited <= timeoutMs; waited += step) {
-        if (QFile::exists(DEV_MAIN) && QFile::exists(DEV_STATIC))
-            return true;
-        QThread::msleep(step);
-    }
     return QFile::exists(DEV_MAIN) && QFile::exists(DEV_STATIC);
 }
 
@@ -103,7 +120,7 @@ static int jsonInt(const QJsonObject &st, const char *key, int def)
 
 bool applyRgb(const QJsonObject &st, QString *err, bool save, const QString &path)
 {
-    if (!waitDevices()) {
+    if (!devicesPresent()) {
         if (err) *err = "facer device missing (module not loaded?)";
         return false;
     }
@@ -111,48 +128,46 @@ bool applyRgb(const QJsonObject &st, QString *err, bool save, const QString &pat
     const int bright = qBound(0, jsonInt(st, "brightness", 100), 100);
 
     QByteArray frame(16, '\0');
-    try {
-        if (mode == 0) {
-            const QJsonArray zones = st["zones"].toArray();
-            for (int i = 0; i < 4; ++i) {
-                QJsonArray z = (i < zones.size() && zones[i].isArray())
-                                   ? zones[i].toArray() : QJsonArray{217, 168, 98};
-                const char mask = char(1 << i);
-                const char rgb[4] = {mask,
-                                     char(z[0].toInt(0) & 255),
-                                     char(z[1].toInt(0) & 255),
-                                     char(z[2].toInt(0) & 255)};
-                QFile fs(DEV_STATIC);
-                if (!fs.open(QIODevice::WriteOnly)) {
-                    if (err) *err = "cannot open " + QString(DEV_STATIC);
-                    return false;
-                }
-                fs.write(rgb, 4);
+    if (mode == 0) {
+        const QJsonArray zones = st["zones"].toArray();
+        for (int i = 0; i < 4; ++i) {
+            QJsonArray z = (i < zones.size() && zones[i].isArray())
+                               ? zones[i].toArray() : QJsonArray{217, 168, 98};
+            const char mask = char(1 << i);
+            const char rgb[4] = {mask,
+                                 char(z[0].toInt(0) & 255),
+                                 char(z[1].toInt(0) & 255),
+                                 char(z[2].toInt(0) & 255)};
+            QFile fs(DEV_STATIC);
+            if (!fs.open(QIODevice::WriteOnly)) {
+                if (err) *err = "cannot open " + QString(DEV_STATIC);
+                return false;
             }
-            frame[2] = char(bright);
-            frame[9] = 1;
-        } else {
-            const int speed = qBound(0, jsonInt(st, "speed", 4), 255);
-            const int dir = jsonInt(st, "direction", 1);
-            const QJsonArray c = st["color"].isArray()
-                                     ? st["color"].toArray() : QJsonArray{217, 168, 98};
-            frame[0] = char(mode);
-            frame[1] = char(speed);
-            frame[2] = char(bright);
-            frame[3] = (mode == 3) ? 8 : 0;
-            frame[4] = char(dir);
-            frame[5] = char(c[0].toInt(0) & 255);
-            frame[6] = char(c[1].toInt(0) & 255);
-            frame[7] = char(c[2].toInt(0) & 255);
-            frame[9] = 1;
+            fs.write(rgb, 4);
         }
-        QFile fm(DEV_MAIN);
-        if (!fm.open(QIODevice::WriteOnly)) {
-            if (err) *err = "cannot open " + QString(DEV_MAIN);
-            return false;
-        }
-        fm.write(frame);
-    } catch (...) {
+        frame[2] = char(bright);
+        frame[9] = 1;
+    } else {
+        const int speed = qBound(0, jsonInt(st, "speed", 4), 255);
+        const int dir = jsonInt(st, "direction", 1);
+        const QJsonArray c = st["color"].isArray()
+                                 ? st["color"].toArray() : QJsonArray{217, 168, 98};
+        frame[0] = char(mode);
+        frame[1] = char(speed);
+        frame[2] = char(bright);
+        frame[3] = (mode == 3) ? 8 : 0;
+        frame[4] = char(dir);
+        frame[5] = char(c[0].toInt(0) & 255);
+        frame[6] = char(c[1].toInt(0) & 255);
+        frame[7] = char(c[2].toInt(0) & 255);
+        frame[9] = 1;
+    }
+    QFile fm(DEV_MAIN);
+    if (!fm.open(QIODevice::WriteOnly)) {
+        if (err) *err = "cannot open " + QString(DEV_MAIN);
+        return false;
+    }
+    if (fm.write(frame) != frame.size()) {
         if (err) *err = "device write failed";
         return false;
     }

@@ -1,35 +1,41 @@
 #pragma once
 #include <QColor>
-#include <QFrame>
-#include <QHash>
 #include <QJsonObject>
 #include <QPoint>
 #include <QRect>
 #include <QWidget>
 #include <functional>
 
-class Swatch : public QFrame
+class QLabel;
+class QSlider;
+class QPushButton;
+class Segmented;
+class Toggle;
+class QHideEvent;
+
+class Keycap : public QWidget
 {
     Q_OBJECT
 public:
-    explicit Swatch(QWidget *parent = nullptr);
-    void setColor(const QColor &c);
-    QColor color() const { return m_c; }
+    Keycap(int row, int col, QWidget *parent = nullptr);
+    int row() const { return m_row; }
+    int col() const { return m_col; }
+    int zone() const { return m_zone; }
+    void setZone(int z) { m_zone = z; }
+    void setRgb(const QColor &c, double glow);
 
 signals:
-    void clicked();
+    void picked(int row, int col);
 
 protected:
+    void paintEvent(QPaintEvent *) override;
     void mousePressEvent(QMouseEvent *ev) override;
 
 private:
-    QColor m_c;
+    int m_row, m_col, m_zone = 0;
+    QColor m_c{27, 26, 38};
+    double m_glow = 0;
 };
-
-class QLabel;
-class QPushButton;
-class QSlider;
-class LevelButton;
 
 class RgbPanel : public QWidget
 {
@@ -39,6 +45,7 @@ public:
 
 protected:
     void showEvent(QShowEvent *ev) override;
+    void hideEvent(QHideEvent *ev) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void mousePressEvent(QMouseEvent *ev) override;
     void mouseMoveEvent(QMouseEvent *ev) override;
@@ -46,21 +53,31 @@ protected:
 
 private:
     void loadUi();
-    void pickZone(int idx);
-    void pickFx();
+    void paintKeyboard();
+    void selectZone(int idx);
+    void pickColorForCurrentZone();   // palette chip or dialog fallback
     void apply();
-    void toggleMax();
+    void syncUiFromState();
 
     QJsonObject m_state;
     bool m_dragging = false;
     QPoint m_dragPos;
     bool m_maximized = false;
     QRect m_normalGeo;
-    Swatch *m_zones[4];
-    Swatch *m_fx;
-    QPushButton *m_sync;
-    QHash<QString, LevelButton *> m_modes;
-    QSlider *m_speed, *m_bright;
-    QLabel *m_speedVal, *m_brightVal, *m_status;
+
+    QWidget *m_kb = nullptr;               // 15x5 keycap grid container
+    QVector<QVector<Keycap *>> m_keys;     // [row][col]
+    Segmented *m_fx = nullptr;
+    QLabel *m_zoneLbl = nullptr;
+    QVector<QPushButton *> m_zones;        // 4 zone chips
+    QWidget *m_pal = nullptr;              // palette chip row (built in ctor)
+    QVector<QPushButton *> m_palBtns;
+    QSlider *m_bright = nullptr, *m_speed = nullptr;
+    QLabel *m_brightVal = nullptr, *m_speedVal = nullptr;
+    Toggle *m_link = nullptr;
+    QLabel *m_status = nullptr;
     std::function<void()> m_openPopup;
+    QTimer *m_paintTimer = nullptr;        // live effect animation (only while visible)
+    double m_t = 0;
+    int m_selZone = 0;
 };

@@ -32,18 +32,30 @@ in C++/Qt6 with identical features and look:
 - **RGB survives reboot & suspend** — saved to
   `~/.config/nitro-control/rgb.json`, re-applied at login
   (`nitro-rgb-restore.service`) and on resume (`system-sleep` hook)
-- **Smooth fan curve** — nbfc custom curve, 7 °C hysteresis, silent at idle
+- **Fan engine** — direct EC writes (no daemon); auto = EC firmware curve,
+  manual = per-fan duty from the popup sliders; thermal guard rolls back ≥88 °C
 - **Single instance** — `~/.nitro-tray.lock`, lazy popup/RGB windows,
   timers only while visible/hot
+
+## Fan engine — direct EC (no nbfc)
+
+Fans are driven straight to the laptop's embedded controller by `bin/nitro-fan`
+(a 2 KB C binary doing `ioperm` port I/O), exec'd through the whitelisted
+`nitro-priv` helper — no nbfc daemon, no external service, no parsing flakiness.
+
+Protocol (decoded from nbfc's own `/dev/port` trace, verified live):
+unlock reg `0x03=0x51` → manual-mode `0x34=0x0C` (CPU) / `0x33=0x30` (GPU) →
+duty bytes `0x37` / `0x3A` (0..100 %). `fan auto` clears the manual bits and the
+EC firmware curve takes over. Tach word `0x13/0x14` (CPU), `0x15/0x16` (GPU).
 
 ## Security (no stored passwords)
 
 Root work goes through `bin/nitro-priv` — a whitelist helper whose every
-effective branch is a fixed literal. `install.sh` installs three **exact-argv
-NOPASSWD sudoers lines** (thermal on/off + `cpu *` with token re-validation
-inside the helper). No password is stored, echoed or derived anywhere;
-`sudo -n` is used by every caller, so a missing rule fails loudly instead of
-prompting.
+effective branch is a fixed literal. `install.sh` installs four **exact-argv
+NOPASSWD sudoers lines** (thermal on/off, `cpu *`, `fan *` — with token
+re-validation inside the helper). No password is stored, echoed or derived
+anywhere; `sudo -n` is used by every caller, so a missing rule fails loudly
+instead of prompting.
 
 ## Build
 
@@ -61,9 +73,10 @@ cmake --build build -j$(nproc)
 ./install.sh
 ```
 
-Builds, installs to `~/.local/bin/nitro-control`, sets up the nbfc fan curve,
-the thermal-guard service and the tray/RGB user services (system parts need
-`sudo`). Verify with `systemctl --user status nitro-tray`.
+Builds, installs to `~/.local/bin/nitro-control`, installs the EC fan helper
+(`/usr/local/libexec/nitro-fan`), the thermal-guard service and the tray/RGB
+user services (system parts need `sudo`). Verify with
+`systemctl --user status nitro-tray`.
 
 ### CLI
 
@@ -84,8 +97,8 @@ Layered — `core` is the engine (no Qt widgets), `ui` is all on-screen stuff,
 src/
   core/
     config.h          tunables: thresholds, level table, paths
-    sensors.*         coretemp / nvidia-smi / nbfc readers (line parser)
-    control.*         apply performance level (async), fan duty via nbfc,
+    sensors.*         coretemp / nvidia-smi / EC fan readers
+    control.*         apply performance level (async), fan duty via EC helper,
                       RGB protocol + state
   ui/
     theme.*           Glass Ghost palette + Qt stylesheet
@@ -97,9 +110,8 @@ src/
   app/
     main.cpp          CLI: tray / --restore-rgb / --screenshot / --selftest
     selftest.cpp      offscreen UI test driver (17+ assertions)
-bin/                  turbo-lvl + nitro-priv (root whitelist) + nitro-thermal-guard
+bin/                  turbo-lvl, nitro-priv (root whitelist), nitro-fan.c (EC), guard
 systemd/              user units + system-sleep RGB hook
-nbfc/                 fan curve config (Author: Kurnia Massidik)
 docs/                 screenshots
 ```
 

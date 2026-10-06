@@ -3,7 +3,6 @@
 #include <QDir>
 #include <QFile>
 #include <QProcess>
-#include <QRegularExpression>
 #include <QTextStream>
 
 namespace sensors {
@@ -45,50 +44,38 @@ QPair<int, int> readTemps()
 QVector<Fan> readFans()
 {
     QVector<Fan> fans;
+    // EC state via the root helper (ioperm needs root; sudoers whitelists it).
     QProcess p;
-    p.start("nbfc", {"status"});
+    p.start(QStringLiteral("sudo"), {QStringLiteral("-n"),
+                                    QStringLiteral("/usr/local/bin/nitro-priv"),
+                                    QStringLiteral("fan"), QStringLiteral("status")});
     if (!p.waitForFinished(3000))
         return fans;
-    // Line-based parse — one giant lazy regex can't handle repeated blocks
-    // (backtracking swallows the GPU fan into match #1 → size()==1 → "—").
-    Fan cur;
-    bool inFan = false;
-    const auto lines = QString::fromUtf8(p.readAllStandardOutput())
-                           .split('\n', Qt::SkipEmptyParts);
-    auto val = [](const QString &l, const char *key) -> QString {
-        const qsizetype k = l.indexOf(key);
-        if (k < 0)
-            return {};
-        return QStringView(l).mid(k + qstrlen(key)).toString()
-                   .mid(l.indexOf(':', k) + 1)
-                   .trimmed();
-    };
-    for (const QString &line : lines) {
-        if (line.startsWith("Fan Display Name")) {
-            if (inFan)
-                fans.append(cur);
-            cur = Fan{};
-            cur.name = val(line, "Fan Display Name");
-            inFan = true;
-            continue;
-        }
-        if (!inFan)
-            continue;
-        if (line.startsWith("Temperature"))
-            cur.temp = val(line, "Temperature").toDouble();
-        else if (line.startsWith("Current Fan Speed"))
-            cur.cur = val(line, "Current Fan Speed").toDouble();
-        else if (line.startsWith("Target Fan Speed"))
-            cur.tgt = val(line, "Target Fan Speed").toDouble();
-        else if (line.startsWith("Fan Speed Steps"))
-            cur.steps = val(line, "Fan Speed Steps").toDouble();
-        else if (line.startsWith("Auto Control Enabled"))
-            cur.autoCtl = val(line, "Auto Control Enabled")
-                              .compare(QLatin1String("true"),
-                                       Qt::CaseInsensitive) == 0;
-    }
-    if (inFan)
-        fans.append(cur);
+    const QStringList parts = QString::fromUtf8(p.readAllStandardOutput())
+                                  .trimmed()
+                                  .split(' ', Qt::SkipEmptyParts);
+    if (parts.size() < 3)
+        return fans;
+    bool okC = false, okG = false, okA = false;
+    const unsigned cw = parts[0].toUInt(&okC);
+    const unsigned gw = parts[1].toUInt(&okG);
+    const int autoBit = parts[2].toInt(&okA);
+    if (!okC || !okG || !okA)
+        return fans;
+    // word duty-of-8500 → percent (same scale the EC tach reports)
+    Fan cpu, gpu;
+    cpu.name = QStringLiteral("CPU Fan");
+    cpu.cur = cw * 100.0 / 8500.0;
+    cpu.tgt = cpu.cur;                       // manual duty == achieved duty
+    cpu.steps = 8500;
+    cpu.autoCtl = autoBit != 0;
+    gpu.name = QStringLiteral("GPU Fan");
+    gpu.cur = gw * 100.0 / 8500.0;
+    gpu.tgt = gpu.cur;
+    gpu.steps = 8500;
+    gpu.autoCtl = autoBit != 0;
+    fans.append(cpu);
+    fans.append(gpu);
     return fans;
 }
 

@@ -361,20 +361,36 @@ void Popup::refresh()
         gRpm = nominalMaxRpm(fans[1]);
         m_fansKnown = true;
         nbfcAuto = fans[0].autoCtl && fans[1].autoCtl;
-        // reflect real duty back into the sliders (echo guard suppresses
-        // writes; sliders show truth even after manual set)
-        const int cpuPct = int(qBound(0.0, fans[0].cur, 100.0));
-        const int gpuPct = int(qBound(0.0, fans[1].cur, 100.0));
+        // echo real duty back into the sliders — BUT target duty is
+        // transiently 0 during EC transitions and idle manual (Current≠0,
+        // Target=0). Echoing that zero stomps the user's setting: the
+        // "sliders snap to 0" bug. Echo Strategy:
+        //   tgt > 0            → mirror target (authoritative)
+        //   tgt == 0, cur > 0  → mirror current (EC still presses air; the
+        //                         target-0 is a transition/idle artifact)
+        //   both == 0          → mirror 0 (deliberate idle, fans parked)
+        // Never echo while the user is dragging, and never inside the
+        // 4 s intent window (fresh write may not be reflected yet).
         const int tgtC = int(qBound(0.0, fans[0].tgt, 100.0));
         const int tgtG = int(qBound(0.0, fans[1].tgt, 100.0));
+        const int curC = int(qBound(0.0, fans[0].cur, 100.0));
+        const int curG = int(qBound(0.0, fans[1].cur, 100.0));
+        int showC = tgtC > 0 ? tgtC : curC;
+        int showG = tgtG > 0 ? tgtG : curG;
+        const qint64 sinceIntent =
+            QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
+        const bool inGrace = sinceIntent < 4000;
+        if (!inGrace && !m_fanCpu->isSliderDown() && m_fanCpu->value() != showC)
+            m_fanCpu->setValue(showC);
+        if (!inGrace && !m_fanGpu->isSliderDown() && m_fanGpu->value() != showG)
+            m_fanGpu->setValue(showG);
         m_programmatic = true;
-        if (!m_fanCpu->isSliderDown() && m_fanCpu->value() != tgtC)
-            m_fanCpu->setValue(tgtC);
-        if (!m_fanGpu->isSliderDown() && m_fanGpu->value() != tgtG)
-            m_fanGpu->setValue(tgtG);
+        m_fanCpuVal->setText(QString("%1%").arg(showC));
+        m_fanGpuVal->setText(QString("%1%").arg(showG));
+        m_fanAllVal->setText(m_fanCpu->value() == m_fanGpu->value()
+                                 ? QString("%1%").arg(showC)
+                                 : QStringLiteral("auto"));
         m_programmatic = false;
-        m_fanCpuVal->setText(QString("%1%").arg(tgtC));
-        m_fanGpuVal->setText(QString("%1%").arg(tgtG));
     } else {
         m_fansKnown = false;   // nbfc missing → dash, not fake 0
     }

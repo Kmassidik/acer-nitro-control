@@ -17,6 +17,24 @@ write_all() { # $1=sysfs filename  $2=value
   return $rc
 }
 
+case "$1" in
+  fan)
+    # fan <pct|auto|status> — direct EC fan duty (replaces nbfc entirely)
+    [ "$#" -eq 2 ] || fail "fan argc=$#"
+    case "$2" in
+      auto|status) ARG="$2" ;;
+      *)
+        case "$2" in
+          ''|*[!0-9]*) fail "fan pct '$2'" ;;
+        esac
+        [ "$2" -le 100 ] || fail "fan pct '$2' > 100"
+        ARG="$2"
+        ;;
+    esac
+    exec /usr/local/libexec/nitro-fan "$ARG"
+    ;;
+esac
+
 case "$1 $2" in
   "thermal on")  systemctl enable --now nitro-thermal; exit $? ;;
   "thermal off") systemctl stop nitro-thermal; exit $? ;;

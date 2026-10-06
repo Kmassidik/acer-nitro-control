@@ -72,21 +72,25 @@ void setLevelAsync(const QString &key, std::function<void()> instrument)
     }
 }
 
-static void runNbfc(const QStringList &args)
+// Fan engine: direct EC via the whitelisted root helper (bin/nitro-priv).
+// sudoers authorizes exactly:  nitro-priv fan <pct>   |  nitro-priv fan auto
+// EC protocol lives in nitro-priv (unlock 0x03=0x51, manual 0x34/0x33,
+// duty bytes 0x37/0x3A) — protocol validated against nbfc's /dev/port trace.
+static void runPrivFan(const QString &arg)
 {
     QProcess p;
-    p.start(QStringLiteral("nbfc"), args);
+    p.start(QStringLiteral("sudo"), {QStringLiteral("-n"),
+                                    QStringLiteral("/usr/local/bin/nitro-priv"),
+                                    QStringLiteral("fan"), arg});
     p.waitForFinished(-1);
 }
 
 void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
 {
-    const int p = qBound(0, pct, 100);
-    auto run = [p, fanIndex, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        QStringList args{"set", "-s", QString::number(p)};
-        if (fanIndex >= 0)
-            args << "-f" << QString::number(fanIndex);
-        runNbfc(args);
+    (void)fanIndex;   // both fans move together on this EC (single duty set)
+    const QString p = QString::number(qBound(0, pct, 100));
+    auto run = [p, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
+        runPrivFan(p);
         if (ctx)
             QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
                                       Qt::QueuedConnection);
@@ -97,7 +101,7 @@ void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
 void setFansAuto(std::function<void()> instrument)
 {
     auto run = [cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        runNbfc({QStringLiteral("set"), QStringLiteral("-a")});
+        runPrivFan(QStringLiteral("auto"));
         if (ctx)
             QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
                                       Qt::QueuedConnection);

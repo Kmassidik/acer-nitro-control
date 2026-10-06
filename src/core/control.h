@@ -11,10 +11,10 @@ void setLevel(const QString &key);  // blocking; UI must call from worker (see s
 // Async wrapper: runs setLevel off the GUI thread, then instruments(key) on it.
 void setLevelAsync(const QString &key, std::function<void()> instrument);
 
-// Fan duty (DAM-FC engine port, driven through nbfc):
-//   setFanPct(pct, fanIndex)  manual duty 0..100 for fan 0/1 (-1 = all)
-//   setFansAuto()             nbfc -a (profile curve / guard takes over)
-// Both off-GUI-thread; nbfc client is slow (unit holds ~2 s).
+// Fan duty — direct EC engine via nitro-priv root helper:
+//   setFanPct(pct)   manual duty 0..100, both fans
+//   setFansAuto()    EC firmware curve resumes
+// Async (worker thread); helper call ~200 ms.
 void setFanPct(int pct, int fanIndex, std::function<void()> instrument);
 void setFansAuto(std::function<void()> instrument);
 

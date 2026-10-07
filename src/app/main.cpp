@@ -12,11 +12,14 @@
 #include <QTimer>
 #include <cstdio>
 
-static bool saveShot(QWidget &w, const QString &file)
+// settleMs: the popup's RPM readout eases toward the real value (~300/70ms)
+// so a short capture would freeze it mid-animation (600 rpm in the asset while
+// the fans ran at 3658). Give it time to converge.
+static bool saveShot(QWidget &w, const QString &file, int settleMs = 200)
 {
     w.show();
     QEventLoop loop;
-    QTimer::singleShot(200, &loop, &QEventLoop::quit);
+    QTimer::singleShot(settleMs, &loop, &QEventLoop::quit);
     loop.exec();
     if (!w.grab().save(file)) {
         std::fprintf(stderr, "nitro-control: cannot save screenshot %s\n",
@@ -82,7 +85,7 @@ int main(int argc, char **argv)
         Popup popup(&tray, [] {});
         popup.refresh();
         popup.toggle(); // also starts refresh/anim timers for the snapshot
-        return saveShot(popup, file) ? 0 : 1;
+        return saveShot(popup, file, 2500) ? 0 : 1;   // let RPM converge
     }
 
     // normal tray: single instance

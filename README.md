@@ -7,6 +7,12 @@ keyboard RGB panel, in a single ~250 KB binary.
 ![popup](docs/screenshot.png)
 ![rgb panel](docs/screenshot-rgb.png)
 
+> **Tested on:** Acer Nitro AN515-58 · i5-12500H · RTX 3050 · Fedora 44 · KDE
+> Plasma (Wayland). The fan engine talks to *this* model's embedded controller
+> (registers below) — other Nitro/Predator models need their own register map,
+> **do not run it blindly on them**. The UI, RGB panel and test suite are
+> model-agnostic.
+
 ## Why C++?
 
 This repo started as a Python/PySide6 app (in git history) and was rewritten
@@ -33,7 +39,10 @@ in C++/Qt6 with identical features and look:
   `~/.config/nitro-control/rgb.json`, re-applied at login
   (`nitro-rgb-restore.service`) and on resume (`system-sleep` hook)
 - **Fan engine** — direct EC writes (no daemon); auto = EC firmware curve,
-  manual = per-fan duty from the popup sliders; thermal guard rolls back ≥88 °C
+  manual = per-fan duty (CPU and GPU independently) from the popup sliders;
+  thermal guard rolls back at ≥88 °C
+- **Fn+F9 / Fn+F10 keyboard-backlight keys** — captured as Plasma global
+  shortcuts (kglobalaccel), step the RGB brightness ±10 %
 - **Single instance** — `~/.nitro-tray.lock`, lazy popup/RGB windows,
   timers only while visible/hot
 
@@ -56,6 +65,21 @@ NOPASSWD sudoers lines** (thermal on/off, `cpu *`, `fan *` — with token
 re-validation inside the helper). No password is stored, echoed or derived
 anywhere; `sudo -n` is used by every caller, so a missing rule fails loudly
 instead of prompting.
+
+## Requirements
+
+| Need | For |
+|---|---|
+| Qt6 (Widgets, Concurrent, DBus), cmake ≥ 3.16, g++/gcc | build |
+| KDE Plasma 6 | global shortcuts (Fn keys), tray |
+| `acer_wmi` blacklisted + `facer` module | RGB (`/dev/acer-gkbbl-0`) |
+| stock Fedora `60-keyboard.hwdb` mapping | Fn+F9/F10 arrive as kbdillum keys |
+| nothing else | **no nbfc, no python, no daemon** |
+
+RGB needs the out-of-tree `facer` module (DKMS). Fn keys need the upstream hwdb
+entries (already shipped by Fedora):
+`KEYBOARD_KEY_ef=!kbdillumup` / `KEYBOARD_KEY_f0=!kbdillumdown` — verify with
+`udevadm info /sys/class/input/event* | grep KEYBOARD_KEY`.
 
 ## Build
 
@@ -109,7 +133,7 @@ src/
     tray.*            system-tray icon, menu, hot pulse
   app/
     main.cpp          CLI: tray / --restore-rgb / --screenshot / --selftest
-    selftest.cpp      offscreen UI test driver (17+ assertions)
+    selftest.cpp      offscreen UI test driver (26 assertions)
 bin/                  turbo-lvl, nitro-priv (root whitelist), nitro-fan.c (EC), guard
 systemd/              user units + system-sleep RGB hook
 docs/                 screenshots

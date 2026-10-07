@@ -54,15 +54,20 @@ QVector<Fan> readFans()
     const QStringList parts = QString::fromUtf8(p.readAllStandardOutput())
                                   .trimmed()
                                   .split(' ', Qt::SkipEmptyParts);
-    if (parts.size() < 4)
+    if (parts.size() < 6)
         return fans;
     bool okC = false, okG = false, okA = false, okD = false;
     const unsigned cw = parts[0].toUInt(&okC);
     const unsigned gw = parts[1].toUInt(&okG);
     const int autoBit = parts[2].toInt(&okA);
-    const int cmdDuty = parts[3].toInt(&okD);   // last commanded manual %
+    const int cmdAll = parts[3].toInt(&okD);    // last both-fans command
     if (!okC || !okG || !okA || !okD)
         return fans;
+    bool okCC = false, okGG = false;
+    int cmdC = parts[4].toInt(&okCC);           // per-fan commanded duty
+    int cmdG = parts[5].toInt(&okGG);
+    if (!okCC) cmdC = cmdAll;
+    if (!okGG) cmdG = cmdAll;
     // word duty-of-8500 → percent (same scale the EC tach reports)
     Fan cpu, gpu;
     cpu.name = QStringLiteral("CPU Fan");
@@ -70,13 +75,13 @@ QVector<Fan> readFans()
     cpu.tgt = cpu.cur;                       // manual duty == achieved duty
     cpu.steps = 8500;
     cpu.autoCtl = autoBit != 0;
-    cpu.cmdDuty = cmdDuty;
+    cpu.cmdDuty = cmdC;
     gpu.name = QStringLiteral("GPU Fan");
     gpu.cur = gw * 100.0 / 8500.0;
     gpu.tgt = gpu.cur;
     gpu.steps = 8500;
     gpu.autoCtl = autoBit != 0;
-    gpu.cmdDuty = cmdDuty;
+    gpu.cmdDuty = cmdG;
     fans.append(cpu);
     fans.append(gpu);
     return fans;

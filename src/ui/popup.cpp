@@ -131,10 +131,10 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         });
         return d;
     };
-    // Close + RGB switch — close hides the panel (re-open from tray click)
+    // Close — a filled pink circle, no glyph (hover swaps the header text)
     auto *closeBtn = mkBtn("closeBtn", [this] { hide(); }, "Close");
-    closeBtn->setText("✕");
-    closeBtn->setFixedWidth(26);
+    closeBtn->setText(QString());
+    closeBtn->setFixedSize(18, 18);
     dots->addWidget(closeBtn);
     m_rgbBtn = mkBtn("utilBtn",
                      [this] { if (m_openRgb) m_openRgb(); }, "RGB panel");

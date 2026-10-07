@@ -70,6 +70,10 @@ int runSelfTest()
     report("popup: RGB utility button exists", rgbBtn != nullptr);
     auto *closeBtn = dotAt("closeBtn");
     report("popup: close button exists", closeBtn != nullptr);
+    if (closeBtn)
+        report("popup: close is an 18x18 circle",
+               closeBtn->width() == 18 && closeBtn->height() == 18 &&
+               closeBtn->text().isEmpty());
     // fan apply button (explicit manual commit)
     auto *fanApply = [&]() -> QPushButton * {
         for (auto *b : popup.findChildren<QPushButton *>())

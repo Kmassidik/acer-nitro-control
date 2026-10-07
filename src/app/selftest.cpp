@@ -218,7 +218,29 @@ int runSelfTest()
 
     panel.hide();
 
-    // ---- engine-level assertions (async wrappers) ----
+    // ---- live level round-trip: engine table MUST match UI table ----
+    // (the wrong-segment bug: turbo-lvl wrote balance_power for key 2 while
+    // config.h expected balance_performance → readLevel()="?" → no segment
+    // lit / wrong segment lit. This test applies each level for real.)
+    {
+        const QString initial = control::readLevel();
+        bool allOk = true;
+        for (const auto &lv : cfg::LEVELS) {
+            control::setLevel(QString::fromLatin1(lv.key));
+            const QString got = control::readLevel();
+            if (got != QLatin1String(lv.key)) {
+                allOk = false;
+                std::printf("FAIL detail: level %s -> readLevel '%s'\n",
+                            lv.key, qPrintable(got));
+            }
+        }
+        report("levels: all 4 apply+read back to the same key", allOk);
+        // restore whatever was live before the test
+        if (initial == "A" || initial == "?" )
+            control::setLevel(QStringLiteral("A"));
+        else
+            control::setLevel(initial);
+    }
     {
         // bounded: async nbfc can take ~2s; timeout at 5s ⇒ FAIL, not hang
         QEventLoop l;

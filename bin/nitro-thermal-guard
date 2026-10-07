@@ -5,9 +5,10 @@
 # forces full blast at 84C. This guard is only the last resort, so it must not
 # flap — a cut that is undone one poll later just causes stutter.
 #
-#   default          lvl3 (powersave / balance_performance / turbo on)
-#   T >= HOT (88)    -> lvl1 (powersave / power / turbo off), held for >= HOLD
-#   T <= COOL (80)   -> back to lvl3, but only after NEED consecutive cool
+#   default          Balanced (powersave / balance_performance / turbo off)
+#   T >= HOT (88)    -> Quiet    (powersave / power / turbo off), held >= HOLD
+#   T <= COOL (80)   -> back to Balanced, only after NEED consecutive cool
+#   (triples match cfg::LEVELS 2 and 1 in src/core/config.h)
 #                       samples AND at least HOLD seconds since the cut
 HOT=88
 COOL=80
@@ -20,7 +21,7 @@ set_lvl() {
   for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo $GOV > "$f"; done
   for f in /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference; do echo $EPP > "$f"; done
   echo $TURBO > /sys/devices/system/cpu/intel_pstate/no_turbo
-  logger -t nitro-thermal "thermal-guard -> lvl ($GOV/$EPP/turbo_off=$TURBO)"
+  logger -t nitro-thermal "thermal-guard -> level ($GOV/$EPP/turbo_off=$TURBO)"
 }
 
 LVL=3

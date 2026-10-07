@@ -45,11 +45,11 @@ QString readLevel()
 
 void setLevel(const QString &key)
 {
-    // "1".."4" manual (old "1".."5" keys collapse to the 4-segment UI),
+    // "1".."4" manual (must match bin/turbo-lvl's table exactly — the UI
+    // reads those sysfs triples back to decide the active segment),
     // "A" = auto thermal guard.
-    const QString arg = (key == "A" || key == "auto")
-                            ? QStringLiteral("auto")
-                            : (key == "5" ? QStringLiteral("4") : key);
+    const QString arg = (key == "A" || key == "auto") ? QStringLiteral("auto")
+                                                      : key;
     QProcess p;
     p.start(cfg::TURBO_LVL, {arg});
     p.waitForFinished(-1);

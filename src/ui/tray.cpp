@@ -11,6 +11,7 @@
 #include <QActionGroup>
 #include <QCoreApplication>
 #include <QJsonObject>
+#include <cstdio>
 #include <QMenu>
 #include <QTimer>
 
@@ -110,8 +111,13 @@ void Tray::nudgeRgb(int delta)
     // Fn+F9/F10 handler: read saved state, step brightness, apply + persist.
     QJsonObject st = control::loadRgb();
     const int b = qBound(0, st["brightness"].toInt(40) + delta, 100);
-    if (b == st["brightness"].toInt(-1))
+    // stderr → journal (systemd user service) — evidence trail for the key path
+    std::fprintf(stderr, "nitro-control: key %s → brightness %d%%\n",
+                 delta > 0 ? "up(Fn+F10)" : "down(Fn+F9)", b);
+    if (b == st["brightness"].toInt(-1)) {
+        std::fprintf(stderr, "nitro-control: key ignored (already at limit)\n");
         return;   // saturation — no-op, no save spam
+    }
     st["brightness"] = b;
     QString err;
     const bool ok = control::applyRgb(st, &err, true);

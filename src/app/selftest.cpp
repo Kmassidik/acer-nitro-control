@@ -16,6 +16,7 @@
 #include <QLabel>
 #include <QMetaObject>
 #include <QMouseEvent>
+#include <QProcess>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSlider>
@@ -233,21 +234,38 @@ int runSelfTest()
         const bool ok = keys.registerKeys();
         report("keys: kglobalaccel shortscut registration", ok);
         if (ok) {
-            // confirm both actions are now owned by nitro_control component
-            bool down = false, up = false;
-            FILE *p = popen(
-                "gdbus call --session --dest org.kde.kglobalaccel "
-                "--object-path /kglobalaccel --method "
-                "org.kde.KGlobalAccel.allComponents 2>/dev/null",
-                "r");
-            if (p) {
-                char buf[512];
-                while (fgets(buf, sizeof buf, p))
-                    if (strstr(buf, "nitro_control"))
-                        down = up = true;
-                pclose(p);
-            }
-            report("keys: nitro_control component exists", down && up);
+            // The codes MUST be the Qt Key values (0x010000b5/b6), not raw
+            // evdev (0x01000000|229/230) — the latter never matched a
+            // physical Fn+F9/F10 press (the dead-shortcut bug).
+            const QByteArray out =
+                [] {
+                    QProcess p;
+                    p.start("gdbus", {"call", "--session", "--dest",
+                                      "org.kde.kglobalaccel", "--object-path",
+                                      "/component/nitro_control", "--method",
+                                      "org.kde.kglobalaccel.Component.allShortcutInfos"});
+                    p.waitForFinished(3000);
+                    return p.readAllStandardOutput();
+                }();
+            report("keys: registered up=0x010000b5 (Qt value)",
+                   out.contains("16777397"));
+            report("keys: registered down=0x010000b6 (Qt value)",
+                   out.contains("16777398"));
+            report("keys: no raw-evdev codes (16777445/6)",
+                   !out.contains("16777445") && !out.contains("16777446"));
+            // THE gate that was missed: component must be ACTIVE or presses
+            // never fire. setForeignShortcut left it inactive (dead keys).
+            const QByteArray active =
+                [] {
+                    QProcess p;
+                    p.start("gdbus", {"call", "--session", "--dest",
+                                      "org.kde.kglobalaccel", "--object-path",
+                                      "/component/nitro_control", "--method",
+                                      "org.kde.kglobalaccel.Component.isActive"});
+                    p.waitForFinished(3000);
+                    return p.readAllStandardOutput();
+                }();
+            report("keys: component isActive == true", active.contains("true"));
         }
     }
 

@@ -7,10 +7,16 @@
 
 namespace qkeys {
 
-// KGlobalAccel stores keycodes as Qt keys: hard keys are plain codes,
-// extended (XF86*) keys get the 0x01000000 high bit.
-static constexpr int KBD_ILLUM_UP   = 0x01000000 | 230;   // KEY_KBDILLUMUP
-static constexpr int KBD_ILLUM_DOWN = 0x01000000 | 229;   // KEY_KBDILLUMDOWN
+// Qt key values, NOT raw evdev codes. Chain of evidence:
+//   hwdb: scancode ef → KEY_KBDILLUMUP (evdev 230), f0 → KEY_KBDILLUMDOWN (229)
+//   xkbcommon-keysyms.h: evdev 0x0e6 → XF86KbdBrightnessUp, 0x0e5 → ...Down
+//   Qt qnamespace.h:     Qt::Key_KeyboardBrightnessUp   = 0x010000b5
+//                        Qt::Key_KeyboardBrightnessDown = 0x010000b6
+// KDE's own powerdevil binding for these keys is 0x010000b5 — proof the
+// platform encoding is the Qt value, not 0x01000000|evdev (which never
+// matched a physical press: the Fn+F9/F10-dead bug).
+static constexpr int KBD_ILLUM_UP   = 0x010000b5;   // Qt::Key_KeyboardBrightnessUp
+static constexpr int KBD_ILLUM_DOWN = 0x010000b6;   // Qt::Key_KeyboardBrightnessDown
 
 static const char *COMPONENT = "nitro_control";
 
@@ -45,39 +51,39 @@ bool GlobalKeyListener::registerKeys()
                r.errorName().contains("AlreadyExists");
     };
 
-    // doRegister() creates the /component/nitro_control node; without it
-    // setForeignShortcut silently drops.
+    // 1. doRegister() creates the /component/nitro_control node + the actions.
     auto reg = QDBusMessage::createMethodCall(
         "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
         "doRegister");
     // actionId = [component, uniqueShortcut, componentFriendly, actionFriendly]
     reg.setArguments({QStringList{COMPONENT, "KbdIllumDown", "Nitro Control",
                                  "Keyboard Backlight Down"}});
-    const QDBusMessage r1 = bus.call(reg);
-    if (!tolerated(r1))
+    if (!tolerated(bus.call(reg)))
         return false;
 
     reg.setArguments({QStringList{COMPONENT, "KbdIllumUp", "Nitro Control",
                                  "Keyboard Backlight Up"}});
-    const QDBusMessage r2 = bus.call(reg);
-    if (!tolerated(r2))
+    if (!tolerated(bus.call(reg)))
         return false;
 
-    // Foreign shortcuts: kglobalaccel grabs the keys and emits
-    // globalShortcutPressed(component, shortcut, ts) — no action object needed.
-    auto fsc = QDBusMessage::createMethodCall(
+    // 2. setShortcut() — THE call that assigns keys AND activates the
+    // component. setForeignShortcut registered the key but left the component
+    // INACTIVE (isActive=false, verified live), so presses never fired: that
+    // plus the raw-evdev codes was the whole Fn+F9/F10-dead bug.
+    // flags=2 (NoAutoloading): don't persist to the user's shortcut config.
+    auto sc = QDBusMessage::createMethodCall(
         "org.kde.kglobalaccel", "/kglobalaccel", "org.kde.KGlobalAccel",
-        "setForeignShortcut");
-    fsc.setArguments({QStringList{COMPONENT, "KbdIllumDown", "Nitro Control",
+        "setShortcut");
+    sc.setArguments({QStringList{COMPONENT, "KbdIllumDown", "Nitro Control",
                                  "Keyboard Backlight Down"},
-                      qkeys_intlist({KBD_ILLUM_DOWN})});
-    if (!tolerated(bus.call(fsc)))
+                     qkeys_intlist({KBD_ILLUM_DOWN}), uint(2)});
+    if (!tolerated(bus.call(sc)))
         return false;
 
-    fsc.setArguments({QStringList{COMPONENT, "KbdIllumUp", "Nitro Control",
+    sc.setArguments({QStringList{COMPONENT, "KbdIllumUp", "Nitro Control",
                                  "Keyboard Backlight Up"},
-                      qkeys_intlist({KBD_ILLUM_UP})});
-    if (!tolerated(bus.call(fsc)))
+                     qkeys_intlist({KBD_ILLUM_UP}), uint(2)});
+    if (!tolerated(bus.call(sc)))
         return false;
 
     // listen

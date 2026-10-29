@@ -27,6 +27,22 @@ write_all() { # $1=sysfs filename  $2=value
 }
 
 case "$1" in
+  fanmode)
+    # fanmode auto|turbo — Gaming fan-behavior engine via facer sysfs
+    # (the AN515-58 Jimny_ADH firmware ignores raw EC duty registers; the
+    # WMI fan-behavior call behind the Predator turbo button is the only
+    # fan-noise control the EC honors — exposed as gaming_fan_mode).
+    case "$2" in
+      auto) M=1 ;;
+      turbo) M=2 ;;
+      *) fail "fanmode '$2'" ;;
+    esac
+    F=/sys/devices/platform/acer-wmi/gaming_fan_mode
+    if [ ! -w "$F" ]; then logger -t nitro-priv "fanmode: $F missing (facer predator_v4 not active)"; exit 3; fi
+    echo "$M" > "$F" || fail "write $F"
+    logger -t nitro-priv "fanmode -> $M"
+    exit 0
+    ;;
   fan)
     # fan <pct|auto|status|cpu PCT|gpu PCT> — direct EC fan engine
     case "$2" in

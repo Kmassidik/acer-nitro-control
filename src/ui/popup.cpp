@@ -398,32 +398,35 @@ void Popup::refresh()
         //   both == 0          → mirror 0 (deliberate idle, fans parked)
         // Never echo while the user is dragging, and never inside the
         // 4 s intent window (fresh write may not be reflected yet).
-        const int curC = int(qBound(0.0, fans[0].cur, 100.0));
-        const int curG = int(qBound(0.0, fans[1].cur, 100.0));
         // Echo the COMMANDED per-fan duty. In MANUAL with a known command:
         // commanded value; in MANUAL with unknown command (helper files not
         // yet written this session, cmdDuty=-9): leave the sliders EXACTLY
         // where the user put them — never reposition from the tach (the
         // screencast bug: sliders drifted toward the easing RPM).
-        // In AUTO: sliders are the curve's live mirror (tach) — fine.
+        // In AUTO: sliders hold the user's last committed intent and the
+        // label says "auto". The old design echoed the live tach — right
+        // after Max→Quiet that showed ~100% on a DISABLED slider, which
+        // reads as a bug. Live RPM belongs in the stat boxes only.
         const bool manualC = !fans[0].autoCtl;
         const bool manualG = !fans[1].autoCtl;
         const bool knownC = manualC && fans[0].cmdDuty >= 0;
         const bool knownG = manualG && fans[1].cmdDuty >= 0;
-        int showC = knownC ? fans[0].cmdDuty : (manualC ? m_fanCpu->value() : curC);
-        int showG = knownG ? fans[1].cmdDuty : (manualG ? m_fanGpu->value() : curG);
+        int showC = knownC ? fans[0].cmdDuty : m_fanCpu->value();
+        int showG = knownG ? fans[1].cmdDuty : m_fanGpu->value();
         const qint64 sinceIntent =
             QDateTime::currentMSecsSinceEpoch() - m_userIntentMs;
         const bool inGrace = sinceIntent < 4000;
         m_programmatic = true;   // silent propagation — no commit relay
         if (!inGrace && !m_fanCpu->isSliderDown() &&
-            (knownC || !manualC) && m_fanCpu->value() != showC)
+            knownC && m_fanCpu->value() != showC)
             m_fanCpu->setValue(showC);
         if (!inGrace && !m_fanGpu->isSliderDown() &&
-            (knownG || !manualG) && m_fanGpu->value() != showG)
+            knownG && m_fanGpu->value() != showG)
             m_fanGpu->setValue(showG);
-        m_fanCpuVal->setText(QString("%1%").arg(showC));
-        m_fanGpuVal->setText(QString("%1%").arg(showG));
+        m_fanCpuVal->setText(knownC ? QString("%1%").arg(showC)
+                                    : QStringLiteral("auto"));
+        m_fanGpuVal->setText(knownG ? QString("%1%").arg(showG)
+                                    : QStringLiteral("auto"));
         m_fanAllVal->setText(
             (knownC && knownG && showC == showG) ? QString("%1%").arg(showC)
                                                  : QStringLiteral("—"));

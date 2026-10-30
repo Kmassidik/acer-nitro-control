@@ -27,6 +27,23 @@ write_all() { # $1=sysfs filename  $2=value
 }
 
 case "$1" in
+  profile)
+    # profile quiet|balanced|lowpower — thermal-profile engine (WMI misc
+    # setting NitroSense drives). THIS is the quiet knob on Jimny_ADH:
+    # gaming fan-mode "auto" pins a ~3300 RPM floor (measured), while the
+    # profile engine idles at ~1800 RPM and re-inits (0 RPM dip) on switch.
+    case "$2" in
+      quiet) P=quiet ;;
+      balanced) P=balanced ;;
+      lowpower) P=low-power ;;
+      *) fail "profile '$2'" ;;
+    esac
+    F=/sys/firmware/acpi/platform_profile
+    if [ ! -e "$F" ]; then logger -t nitro-priv "profile: $F missing"; exit 3; fi
+    echo "$P" > "$F" || fail "write $F=$P"
+    logger -t nitro-priv "profile -> $P"
+    exit 0
+    ;;
   fanmode)
     # fanmode auto|turbo — Gaming fan-behavior engine via facer sysfs
     # (the AN515-58 Jimny_ADH firmware ignores raw EC duty registers; the

@@ -196,7 +196,13 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         // manual levels, so a click also exits auto. No staged Apply button.
         const QString key = QLatin1String(cfg::LEVELS[idx].key);
         m_desc->setText(QString("applying %1…").arg(cfg::LEVELS[idx].title));
-        control::setLevelAsync(key, [this] { refresh(); });
+        control::setLevelAsync(key, [this, idx](bool ok) {
+            if (ok)
+                toast(QString("%1 applied").arg(cfg::LEVELS[idx].title));
+            else
+                toast(QStringLiteral("apply failed — see journalctl -t nitro-priv"));
+            refresh();
+        });
     });
     m_desc = new QLabel(QString::fromLatin1(cfg::LEVELS[1].sub));
     m_desc->setObjectName("status");
@@ -252,7 +258,11 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         m_intentAuto = on;
         if (on) {
             // no pending-write risk: writes commit only on physical release
-            control::setFansAuto([this] { refresh(); });
+            control::setFansAuto([this](bool ok) {
+                toast(ok ? QStringLiteral("Auto fan control — firmware curve")
+                         : QStringLiteral("auto failed — see journalctl -t nitro-priv"));
+                refresh();
+            });
             m_pending = QStringLiteral("A");
             m_desc->setText(QStringLiteral("applying auto (thermal guard)…"));
             applySelection();
@@ -306,23 +316,7 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     fanApply->setObjectName("applyBtn");
     fanApply->setCursor(Qt::PointingHandCursor);
     connect(fanApply, &QPushButton::clicked, this, [this] {
-        const int c = m_fanCpu->value(), g = m_fanGpu->value();
-        m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
-        // CHAIN: write cpu → write gpu → ONE refresh after both state saves
-        // landed. (Firing per-write refreshes let CPU's refresh paint the
-        // pre-GPU state file → sliders snapped back to the old values.)
-        const auto afterCpu = [this, g] {
-            if (g == m_fanCpu->value()) {   // same value → single both-fan write done
-                refresh();
-                return;
-            }
-            control::setFanPct(g, 1, [this] { refresh(); });
-        };
-        if (c == g)
-            control::setFanPct(c, -1, [this] { refresh(); });
-        else
-            control::setFanPct(c, 0, afterCpu);
-        m_desc->setText(QString("fans: %1% / %2%").arg(c).arg(g));
+        commitFans(m_fanCpu->value(), m_fanGpu->value(), /*notify=*/true);
     });
     lay->addWidget(fanApply);
     lay->addWidget(hline);
@@ -433,6 +427,8 @@ void Popup::refresh()
         m_fanAllVal->setText(
             (knownC && knownG && showC == showG) ? QString("%1%").arg(showC)
                                                  : QStringLiteral("—"));
+        if (knownC) m_appliedC = showC;   // persisted command = applied truth
+        if (knownG) m_appliedG = showG;
         m_programmatic = false;
     } else {
         m_fansKnown = false;   // nbfc missing → dash, not fake 0
@@ -496,7 +492,11 @@ void Popup::applySelection()
                 m_desc->setText(QString("applying %1…").arg(lv.title));
                 break;
             }
-    control::setLevelAsync(applied, [this] { refresh(); });
+    control::setLevelAsync(applied, [this, applied](bool ok) {
+        if (!ok)
+            toast(QStringLiteral("apply failed — see journalctl -t nitro-priv"));
+        refresh();
+    });
 }
 
 void Popup::applyFans()
@@ -507,14 +507,43 @@ void Popup::applyFans()
     // the ghost pairing). Auto never calls here anymore at all.
     if (m_auto->isChecked())
         return;
-    const int c = m_fanCpu->value(), g = m_fanGpu->value();
-    if (c == g)
-        control::setFanPct(c, -1, [this] { refresh(); });
-    else {
-        control::setFanPct(c, 0, [this] { refresh(); });
-        control::setFanPct(g, 1, [this] { refresh(); });
-    }
+    commitFans(m_fanCpu->value(), m_fanGpu->value(), /*notify=*/true);
+}
+
+void Popup::commitFans(int c, int g, bool notify)
+{
+    // Single commit point for both the Apply button and popup-close
+    // (apply-before-close so a dragged-but-unapplied slider isn't lost).
     m_userIntentMs = QDateTime::currentMSecsSinceEpoch();
+    const auto toastDone = [this, c, g](bool ok) {
+        if (ok) {
+            m_appliedC = c;
+            m_appliedG = g;
+            toast(QString("Fans set: CPU %1% · GPU %2%").arg(c).arg(g));
+        } else {
+            toast(QStringLiteral("fan apply failed — see journalctl -t nitro-priv"));
+        }
+        refresh();
+    };
+    // CHAIN: write cpu → write gpu → ONE refresh after both state saves
+    // landed. (Firing per-write refreshes let CPU's refresh paint the
+    // pre-GPU state file → sliders snapped back to the old values.)
+    if (c == g) {
+        control::setFanPct(c, -1, toastDone);
+    } else {
+        const auto afterCpu = [this, g, toastDone](bool okC) {
+            if (!okC) { toastDone(false); return; }
+            control::setFanPct(g, 1, toastDone);
+        };
+        control::setFanPct(c, 0, afterCpu);
+    }
+}
+
+void Popup::toast(const QString &msg)
+{
+    if (m_tray)
+        m_tray->showMessage(QStringLiteral("Nitro Control"), msg,
+                            QSystemTrayIcon::Information, 4000);
 }
 
 void Popup::place()
@@ -599,6 +628,14 @@ void Popup::hideEvent(QHideEvent *ev)
 {
     m_timer->stop();
     m_anim->stop();
+    // Apply-before-close: a dragged-but-unapplied slider is an intent, not a
+    // throwaway — commit it so closing the popup never loses the config.
+    // (Auto mode owns the fans: sliders are its live mirror, nothing pending.)
+    if (!m_auto->isChecked() && m_fansKnown) {
+        const int c = m_fanCpu->value(), g = m_fanGpu->value();
+        if (c != m_appliedC || g != m_appliedG)
+            commitFans(c, g, /*notify=*/false);
+    }
     QWidget::hideEvent(ev);
 }
 

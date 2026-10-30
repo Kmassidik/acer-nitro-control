@@ -38,6 +38,8 @@ private:
     void applyLevel(const QString &lvl, bool fansAuto);
     void applySelection();
     void applyFans();
+    void commitFans(int c, int g, bool notify);
+    void toast(const QString &msg);
     void place();
     void toggleMax();
 
@@ -65,6 +67,7 @@ private:
 
     QString m_level = "?";
     QString m_pending;
+    int m_appliedC = -1, m_appliedG = -1;   // last EC-committed duty (or -1 unknown)
     int m_targetCpuRpm = 0, m_targetGpuRpm = 0;   // real, from nbfc
     int m_uiCpuRpm = 0, m_uiGpuRpm = 0;           // smoothed for display
     bool m_fansKnown = false;                     // false = nbfc unreachable

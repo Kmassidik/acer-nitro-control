@@ -68,8 +68,13 @@ void Tray::buildMenu()
     m_levelActs.append(autoAct);
     for (auto *act : m_levelActs)
         connect(act, &QAction::triggered, this, [this, act] {
-            control::setLevelAsync(act->data().toString(),
-                                   [this] { QTimer::singleShot(300, this, &Tray::poll); });
+            control::setLevelAsync(act->data().toString(), [this, act](bool ok) {
+                showMessage("Nitro Control",
+                            ok ? QString("%1 applied").arg(act->text().section('(', 0, 0).trimmed())
+                               : QStringLiteral("apply failed — see journalctl -t nitro-priv"),
+                            QSystemTrayIcon::Information, 4000);
+                QTimer::singleShot(300, this, &Tray::poll);
+            });
         });
     m_menu->addSeparator();
     m_info = m_menu->addAction("—");

@@ -246,7 +246,7 @@ int runSelfTest()
         QEventLoop l;
         bool fired = false;
         QTimer::singleShot(5000, &l, &QEventLoop::quit);
-        control::setFansAuto([&] {
+        control::setFansAuto([&](bool) {
             fired = true;
             QMetaObject::invokeMethod(&l, "quit", Qt::QueuedConnection);
         });

@@ -43,7 +43,7 @@ QString readLevel()
     return "?";
 }
 
-void setLevel(const QString &key)
+bool setLevel(const QString &key)
 {
     // "1".."4" manual (must match bin/turbo-lvl's table exactly — the UI
     // reads those sysfs triples back to decide the active segment),
@@ -53,30 +53,32 @@ void setLevel(const QString &key)
     QProcess p;
     p.start(cfg::TURBO_LVL, {arg});
     p.waitForFinished(-1);
+    return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
-void setLevelAsync(const QString &key, std::function<void()> instrument)
+void setLevelAsync(const QString &key, std::function<void(bool ok)> instrument)
 {
     // Runs turbo-lvl on a worker thread; QMetaObject::invokeMethod hops the
     // instrument callback back to the caller's (GUI) thread event loop.
     if (auto *ctx = QCoreApplication::instance()) {
         QThreadPool::globalInstance()->start(
             [ctx, key, cb = std::move(instrument)]() mutable {
-                setLevel(key);
-                QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+                const bool ok = setLevel(key);
+                QMetaObject::invokeMethod(ctx, [cb = std::move(cb), ok] { if (cb) cb(ok); },
                                           Qt::QueuedConnection);
             });
     } else {
-        setLevel(key);
-        if (instrument) instrument();
+        const bool ok = setLevel(key);
+        if (instrument) instrument(ok);
     }
 }
 
 // Fan engine: direct EC via the whitelisted root helper (bin/nitro-priv).
 // sudoers authorizes exactly:  nitro-priv fan <pct>   |  nitro-priv fan auto
-// EC protocol lives in nitro-priv (unlock 0x03=0x51, manual 0x34/0x33,
-// duty bytes 0x37/0x3A) — protocol validated against nbfc's /dev/port trace.
-static void runPrivFan(const QStringList &args)
+// EC protocol lives in nitro-fan (unlock 0x03=0x11 without which the fan
+// engine ignores duty, manual 0x22/0x21, duty bytes 0x37/0x3A) — verified
+// live on Jimny_ADH: duty ramps RPM within seconds.
+static bool runPrivFan(const QStringList &args)
 {
     QProcess p;
     QStringList full{QStringLiteral("-n"),
@@ -85,9 +87,10 @@ static void runPrivFan(const QStringList &args)
     full += args;
     p.start(QStringLiteral("sudo"), full);
     p.waitForFinished(-1);
+    return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
-void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
+void setFanPct(int pct, int fanIndex, std::function<void(bool ok)> instrument)
 {
     // fanIndex: -1 = both, 0 = CPU only, 1 = GPU only (independent sliders —
     // nitro-priv routes to nitro-fan cpu|gpu <pct>, helper writes only that
@@ -101,20 +104,20 @@ void setFanPct(int pct, int fanIndex, std::function<void()> instrument)
     else
         args << QString::number(p);
     auto run = [args, cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        runPrivFan(args);
+        const bool ok = runPrivFan(args);
         if (ctx)
-            QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+            QMetaObject::invokeMethod(ctx, [cb = std::move(cb), ok] { if (cb) cb(ok); },
                                       Qt::QueuedConnection);
     };
     QThreadPool::globalInstance()->start(std::move(run));
 }
 
-void setFansAuto(std::function<void()> instrument)
+void setFansAuto(std::function<void(bool ok)> instrument)
 {
     auto run = [cb = std::move(instrument), ctx = QCoreApplication::instance()]() mutable {
-        runPrivFan({QStringLiteral("auto")});
+        const bool ok = runPrivFan({QStringLiteral("auto")});
         if (ctx)
-            QMetaObject::invokeMethod(ctx, [cb = std::move(cb)] { if (cb) cb(); },
+            QMetaObject::invokeMethod(ctx, [cb = std::move(cb), ok] { if (cb) cb(ok); },
                                       Qt::QueuedConnection);
     };
     QThreadPool::globalInstance()->start(std::move(run));

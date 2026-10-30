@@ -6,8 +6,12 @@
 //   nitro-fan <0..100>                        → BOTH fans at pct
 //   nitro-fan cpu <0..100>                    → CPU fan only
 //   nitro-fan gpu <0..100>                    → GPU fan only
-// Protocol verified on Acer Nitro AN515-58 (identical to nbfc's writes):
-//   unlock reg 0x03=0x51 → manual 0x34=0x0C (CPU), 0x33=0x30 (GPU)
+// Protocol verified live on AN515-58 ("Jimny_ADH" BIOS V1.11) — the EC fan
+// block stays LOCKED until register 0x03 gets 0x11 (the old 0x51 value is
+// silently accepted but the fan engine ignores it, same story as AN515-47):
+//   unlock reg 0x03=0x11 → manual 0x22=0x0C (CPU), 0x21=0x30 (GPU)
+//   auto: 0x22=0x04, 0x21=0x10 — firmware curve resumes (verified: duty
+//   0x37/0x3A=0x64 ramps both fans to 7500 RPM within 8 s after unlock)
 //   duty bytes 0x37 (CPU), 0x3A (GPU), 0..100 percent
 //   tach: word 0x13/0x14 (CPU), 0x15/0x16 (GPU) — duty-of-8500 scale
 //   auto: manual bits → 0x04/0x10 (nbfc's documented reset values), curve resumes
@@ -91,9 +95,9 @@ int main(int argc, char **argv)
         return 0;
     }
     if (strcmp(argv[1], "auto") == 0) {
-        ecwr(0x03, 0x51);   // unlock
-        ecwr(0x34, 0x04);   // CPU fan → auto (firmware curve; nbfc's reset value)
-        ecwr(0x33, 0x10);   // GPU fan → auto
+        ecwr(0x03, 0x11);   // unlock (0x11 = the value this firmware honors)
+        ecwr(0x22, 0x04);   // CPU fan → auto (firmware curve; nbfc's reset value)
+        ecwr(0x21, 0x10);   // GPU fan → auto
         save("fanmode", "1");
         save("fanduty", "-1");
         save("fanduty_cpu", "-1");
@@ -107,8 +111,8 @@ int main(int argc, char **argv)
         if (pct < 0 || pct > 100) { fprintf(stderr, "pct 0..100\n"); return 2; }
         const unsigned char p = (unsigned char)pct;
         const int isCpu = strcmp(argv[1], "cpu") == 0;
-        ecwr(0x03, 0x51);           // unlock
-        ecwr(isCpu ? 0x34 : 0x33, isCpu ? 0x0C : 0x30);   // THIS fan manual
+        ecwr(0x03, 0x11);           // unlock (0x11 = the value this firmware honors)
+        ecwr(isCpu ? 0x22 : 0x21, isCpu ? 0x0C : 0x30);   // THIS fan manual
         ecwr(isCpu ? 0x37 : 0x3A, p);                     // THIS fan duty
         char b[8];
         snprintf(b, sizeof b, "%d", pct);
@@ -121,9 +125,9 @@ int main(int argc, char **argv)
     if (pct < 0 || pct > 100) { fprintf(stderr, "pct 0..100\n"); return 2; }
     const unsigned char p = (unsigned char)pct;
 
-    ecwr(0x03, 0x51);       // unlock
-    ecwr(0x34, 0x0C);       // CPU fan manual
-    ecwr(0x33, 0x30);       // GPU fan manual
+    ecwr(0x03, 0x11);       // unlock (0x11 = the value this firmware honors)
+    ecwr(0x22, 0x0C);       // CPU fan manual
+    ecwr(0x21, 0x30);       // GPU fan manual
     ecwr(0x37, p);          // CPU duty
     ecwr(0x3A, p);          // GPU duty
     char b[8];

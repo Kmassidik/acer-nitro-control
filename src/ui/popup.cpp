@@ -215,7 +215,9 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
         s->setRange(0, 100);
         val = new QLabel("auto");
         val->setObjectName("lab");
-        s->setToolTip("Manual fan duty; auto toggle reverts to the curve");
+        s->setToolTip("Manual duty (this fan only)\n"
+                      "0% ≈ 1800 rpm (firmware floor — fans never fully stop)\n"
+                      "100% ≈ 7500 rpm. Commits on Apply, or when the popup closes.");
         auto *h = new QHBoxLayout;
         h->setContentsMargins(2, 4, 2, 0);
         auto *b = new QLabel(name);
@@ -248,8 +250,9 @@ Popup::Popup(QSystemTrayIcon *tray, std::function<void()> openRgb, QWidget *pare
     auto *r1 = new QLabel("Auto fan control");
     r1->setObjectName("row");
     m_auto = new Toggle;
-    m_auto->setToolTip("Auto = nbfc curve (guard may still cut turbo ≥88 °C).\n"
-                       "Manual = your slider duty wins, guard keeps watch.");
+    m_auto->setToolTip("Auto = firmware curve: profile-steered (Quiet/Balanced buttons also pick the profile)\n"
+                       "Manual = your slider duty wins (0% ≈ 1800 rpm, 100% ≈ 7500 rpm).\n"
+                       "Thermal guard may force Max at ≥88 °C, recovers ≤80 °C.");
     connect(m_auto, &Toggle::toggled, this, [this](bool on) {
         // OPTIMISTIC UI + intent latch: reflect the user's choice instantly.
         // refresh() may not correct the toggle for 4 s (async nbfc write +
@@ -470,7 +473,9 @@ void Popup::applyLevel(const QString &lvl, bool fansAuto)
             if (lvl == QLatin1String(cfg::LEVELS[i].key)) {
                 if (m_seg->current() != i)
                     m_seg->select(i, false, /*silent=*/true);   // UI sync only!
-                m_desc->setText(QString::fromLatin1(cfg::LEVELS[i].sub));
+                m_desc->setText(QString("%1 · Fan: %2")
+                                    .arg(QLatin1String(cfg::LEVELS[i].sub),
+                                         QLatin1String(cfg::LEVELS[i].fan)));
                 known = true;
                 break;
             }

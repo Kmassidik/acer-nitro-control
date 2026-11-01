@@ -1,0 +1,15 @@
+[Unit]
+Description=EasyEffects bass-boost EQ for the headset
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/sleep 3
+ExecStart=/usr/bin/easyeffects --service-mode
+ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do timeout 8 /usr/bin/easyeffects -l Boosted 2>/dev/null && exit 0; sleep 1; done; exit 0'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

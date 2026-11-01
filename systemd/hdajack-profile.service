@@ -1,0 +1,12 @@
+[Unit]
+Description=HDA jack -> PipeWire profile sync (headset plug/unplug)
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+ExecStart=%h/.local/bin/hdajack-profile
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

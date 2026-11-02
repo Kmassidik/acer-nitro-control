@@ -51,6 +51,31 @@ while :; do
     # (observed: silence after unplug with EE alive and bound to HP node).
     systemctl --user try-restart easyeffects.service 2>/dev/null
     last=$state
+    drifted=""
+    continue
+  fi
+  # Self-heal: WirePlumber can momentarily set the ACTIVE PROFILE to "off"
+  # (observed right after boot — speakers absent entirely). If the active
+  # profile doesn't match what the jack says, assert the profile and rebind
+  # the EQ — cheap read, only acts on genuine drift.
+  if [ -n "$state" ]; then
+    want=""
+    case $state in
+      on)  want=$HP_PROFILE ;;
+      off) want=$SP_PROFILE ;;
+    esac
+    cur=$(pactl -f json list cards 2>/dev/null | python3 -c '
+import json,sys
+for c in json.load(sys.stdin):
+    if "skl_hda_dsp_generic" in c.get("name",""):
+        print(c.get("active_profile",""))
+        break
+' 2>/dev/null)
+    if [ "$cur" != "$want" ] && [ -n "$cur" ] || [ -z "$cur" ]; then
+      pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null \
+        && logger -t hdajack-profile "drift heal: profile was '${cur:-off}' → $want"
+      systemctl --user try-restart easyeffects.service 2>/dev/null
+    fi
   fi
   sleep 3
 done

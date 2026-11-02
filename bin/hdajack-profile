@@ -50,6 +50,13 @@ while :; do
     # profile switch its sink may still target the vanished one
     # (observed: silence after unplug with EE alive and bound to HP node).
     systemctl --user try-restart easyeffects.service 2>/dev/null
+    # Loudness integration: the Plasma volume widget drives the EasyEffects
+    # VIRTUAL sink; a hardware sink below 1.0 caps real loudness (observed:
+    # widget at 100% but speaker rate-limited at 52%). Normalize the new
+    # hardware sink so the widget slider owns the whole loudness range.
+    for sid in $(wpctl status | sed -n '/Sinks:/,/Sources:/p' | grep -oE '[0-9]+\. Al[a-zA-Z :/P()-]+' | grep -oE '^[0-9]+' ); do
+      wpctl set-volume "$sid" 1.0 2>/dev/null && logger -t hdajack-profile "normalized hw sink $sid to 1.0"
+    done
     last=$state
     drifted=""
     continue

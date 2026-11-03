@@ -1,101 +1,128 @@
 #!/usr/bin/env bash
-# hdajack-profile — keep the HDA card profile in sync with the 3.5mm jack.
-# Why this exists: this codec's profiles are exclusive (Speaker OR Headphones)
-# and PipeWire only picks a profile at device init. A headset plugged in AFTER
-# boot never triggers a profile switch (the jack port doesn't exist inside the
-# Speaker profile) → "headset not showing up". This watcher polls the kernel
-# Headphone Jack state and applies the matching profile.
+# hdajack-profile — desktop-audio integration guard for sof-hda-dsp.
+#
+# One loop, ONE source of truth per concern. Handles every failure mode
+# observed live on this Alder Lake / AN515-58 (Fedora 44, PipeWire 1.6.8):
+#
+#   F1 jack plug/unplug is invisible   — UCM profiles are exclusive
+#        (Speaker OR Headphones); a late plug never raises a port event,
+#        so we re-pick the matching profile from kernel jack state.
+#   F2 profile races to 'off'/'pro-audio' after external switches —
+#        WirePlumber's restore policy is applied around us; set → settle
+#        → RE-ASSERT beats the race, and drift is healed every tick.
+#   F3 route volume regressions on every relink (1.0 → 0.60 observed) —
+#        hardware analog sinks pinned to 1.0 every tick. Loudness lives in
+#        one place: the EasyEffects virtual sink that Fn keys/widget drive.
+#   F4 effect chains latch onto nodes removed by profile switches —
+#        EasyEffects is try-restarted whenever the profile truly changed.
+#
+# Output discipline: user-visible events go to syslog (-t hdajack-profile);
+# per-tick enforcement is silent when idempotent. Parsing rule learned the
+# hard way: wpctl status embeds box-drawing chars and '*' around IDs —
+# always tr -cd '0-9' after extraction; wpctl errors are never trusted.
 set -u
-find_card() {
-  # the sof-hda analog card (has 'Headphone Jack' switch); index can change per boot
-  for c in /proc/asound/card[0-9]*; do
-    [ -d "$c" ] || continue
-    idx=${c#/proc/asound/card}
-    if amixer -c "$idx" contents 2>/dev/null | grep -q "name='Headphone Jack'"; then
-      echo "$idx"
-      return 0
-    fi
-  done
-  return 1
-}
+
+CARDNAME=alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic
 HP_PROFILE="HiFi (HDMI1, HDMI2, HDMI3, Headphones, Mic1, Mic2)"
 SP_PROFILE="HiFi (HDMI1, HDMI2, HDMI3, Mic1, Mic2, Speaker)"
-CARDNAME=alsa_card.pci-0000_00_1f.3-platform-skl_hda_dsp_generic
+HEAL_LOG=/tmp/nitro-jack-watch.log   # rolling trace of enforcement actions
 
-last=""
-while :; do
-  idx=$(find_card)
-  state=""
-  if [ -n "$idx" ]; then
-    v=$(amixer -c "$idx" contents 2>/dev/null | grep -A2 "name='Headphone Jack'")
+find_card() {
+    for c in /proc/asound/card[0-9]*; do
+        [ -d "$c" ] || continue
+        idx=${c#/proc/asound/card}
+        if amixer -c "$idx" contents 2>/dev/null | grep -q "name='Headphone Jack'"; then
+            echo "$idx"; return 0
+        fi
+    done
+    return 1
+}
+
+jack_state() {
+    local v
+    v=$(amixer -c "$1" contents 2>/dev/null | grep -A2 "name='Headphone Jack'")
     case $v in
-      *values=on*)  state=on  ;;
-      *values=off*) state=off ;;
+        *values=on*)  echo on  ;;
+        *values=off*) echo off ;;
     esac
-  fi
-  if [ -n "$state" ] && [ "$state" != "$last" ]; then
-    want=""
-    case $state in
-      on)  want=$HP_PROFILE ;;
-      off) want=$SP_PROFILE ;;
-    esac
-    # Set profile, wait for the port settle, then re-assert — WirePlumber's
-    # own restore-policy race can shove the card onto the raw pro-audio
-    # profile right after ours; the second write wins that race.
-    pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null \
-      && logger -t hdajack-profile "jack $state → profile $want"
-    sleep 2
-    pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null
-    # Rebind EasyEffects to the (new) default hardware node — after a
-    # profile switch its sink may still target the vanished one
-    # (observed: silence after unplug with EE alive and bound to HP node).
-    systemctl --user try-restart easyeffects.service 2>/dev/null
-    # hardware volume is enforced every tick below — nothing else needed here
-    last=$state
-    drifted=""
-    continue
-  fi
-  # Self-heal: WirePlumber can momentarily set the ACTIVE PROFILE to "off"
-  # (observed right after boot — speakers absent entirely). If the active
-  # profile doesn't match what the jack says, assert the profile and rebind
-  # the EQ — cheap read, only acts on genuine drift.
-  # ALSO: hardware analog sinks drift back to stale route volumes restored
-  # by WirePlumber on every relink (observed 0.60 after a 1.0 normalization
-  # minutes earlier) — Fn keys/widget drive the EasyEffects virtual sink, so
-  # a sub-1.0 hardware cap makes them feel "not integrated". Enforce 1.0 on
-  # Speaker/Headphones analog sinks EVERY tick (HDMI untouched), silently
-  # when already correct.
-  did_heal=""
-  if [ -n "$state" ]; then
-    want=""
-    case $state in
-      on)  want=$HP_PROFILE ;;
-      off) want=$SP_PROFILE ;;
-    esac
-    cur=$(pactl -f json list cards 2>/dev/null | python3 -c '
+}
+
+active_profile() {
+    pactl -f json list cards 2>/dev/null | python3 -c '
 import json,sys
 for c in json.load(sys.stdin):
     if "skl_hda_dsp_generic" in c.get("name",""):
-        print(c.get("active_profile",""))
+        print(c.get("active_profile","") or "off")
         break
-' 2>/dev/null)
-    if [ "$cur" != "$want" ] && [ -n "$cur" ] || [ -z "$cur" ]; then
-      pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null \
-        && did_heal=profile && logger -t hdajack-profile "drift heal: profile was '${cur:-off}' → $want"
-      did_heal=drift
+' 2>/dev/null
+}
+
+# F3: sink locator — parse survives the box chars and the '*' default marker
+hw_sink_id() {
+    wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' \
+        | grep " $1 \[" | cut -d. -f1 | tr -cd '0-9'
+}
+
+pin_hw_volume() {   # only Speaker/Headphones — HDMI outputs keep their own gain
+    local nm sid cur
+    for nm in Speaker Headphones; do
+        sid=$(hw_sink_id "$nm")
+        [ -n "$sid" ] || continue
+        cur=$(wpctl get-volume "$sid" 2>/dev/null)
+        case $cur in *"Volume: 1.00"*) continue ;; esac
+        if wpctl set-volume "$sid" 1.0; then
+            echo "$(date '+%m%d %H:%M') pin $nm ($sid): '${cur:-?}' → 1.00" >> "$HEAL_LOG"
+        fi
+    done
+}
+
+assert_profile() {  # set, let ports settle, re-assert (F2 race)
+    local want=$1
+    if ! pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null; then
+        return 1
     fi
-  fi
-  for nm in Speaker Headphones; do
-    sid=$(wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | grep " $nm \[" | cut -d. -f1 | tr -cd '0-9')
-    [ -z "$sid" ] && continue
-    if wpctl get-volume "$sid" 2>/dev/null | grep -q "Volume: 1.00"; then
-      continue
+    sleep 2
+    pactl set-card-profile "$CARDNAME" "$want" 2>/dev/null
+    echo "$(date '+%m%d %H:%M') profile → $want" >> "$HEAL_LOG"
+    return 0
+}
+
+[[ -f $HEAL_LOG ]] || : > "$HEAL_LOG"
+
+last=""
+while :; do
+    state=""
+    if idx=$(find_card); then
+        state=$(jack_state "$idx")
     fi
-    wpctl set-volume "$sid" 1.0 2>/dev/null && echo "hw sink $nm ($sid) normalized to 1.0" >> /tmp/nitro-jack-watch.log
-  done
-  if [ -n "$did_heal" ]; then
-    # rebind the EQ after any profile drift
-    systemctl --user try-restart easyeffects.service 2>/dev/null
-  fi
-  sleep 3
+
+    if [ -n "$state" ] && [ "$state" != "$last" ]; then
+        case $state in
+            on)  want=$HP_PROFILE ;;
+            off) want=$SP_PROFILE ;;
+        esac
+        if assert_profile "$want"; then
+            logger -t hdajack-profile "jack $state → $want"
+            systemctl --user try-restart easyeffects.service 2>/dev/null   # F4
+        fi
+        last=$state
+    fi
+
+    # F2 + F3 per-tick: heal silent drift the same way, minus the restart
+    if [ -n "$state" ]; then
+        case $state in
+            on)  want=$HP_PROFILE ;;
+            off) want=$SP_PROFILE ;;
+        esac
+        cur=$(active_profile)
+        if [ "$cur" != "$want" ]; then
+            if assert_profile "$want"; then
+                logger -t hdajack-profile "drift heal: was '${cur:-off}'"
+                systemctl --user try-restart easyeffects.service 2>/dev/null
+            fi
+        fi
+        pin_hw_volume
+    fi
+
+    sleep 3
 done

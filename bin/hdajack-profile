@@ -63,15 +63,40 @@ hw_sink_id() {
         | grep " $1 \[" | cut -d. -f1 | tr -cd '0-9'
 }
 
-pin_hw_volume() {   # only Speaker/Headphones — HDMI outputs keep their own gain
-    local nm sid cur
+# Mirror state integration: the Plasma widget mutates EXACTLY ONE device
+# (the selected/default one). With the EQ chain there are two devices
+# (virtual EE sink + hardware), and a stream may sit pointed directly at
+# hardware — then widget mute says MUTED while the speaker keeps playing
+# (observed live). Mirror the default sink's volume AND mute onto the
+# hardware analog sinks every tick so any bypassing stream obeys the
+# widget too.
+mirror_default_state() {
+    # 1) the device the widget actually controls = the '*' default sink
+    local defaultsid line dvol=1.0 dmute=false nm hw hvol hmute
+    defaultsid=$(wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' \
+        | grep '\*' | cut -d. -f1 | tr -cd '0-9' | head -1)
+    [ -n "$defaultsid" ] || return 0
+    line=$(wpctl get-volume "$defaultsid" 2>/dev/null)
+    case $line in
+        *MUTED*) dmute=true ;;
+    esac
+    dvol=$(echo "$line" | sed -e 's/.*Volume: //' -e 's/ \[.*//')
+    case $dvol in ''|*[!0-9.]*) dvol=1.0 ;; esac
+    # 2) mirror onto hardware analog sinks (0=unmute, 1=mute for wpctl)
     for nm in Speaker Headphones; do
-        sid=$(hw_sink_id "$nm")
-        [ -n "$sid" ] || continue
-        cur=$(wpctl get-volume "$sid" 2>/dev/null)
-        case $cur in *"Volume: 1.00"*) continue ;; esac
-        if wpctl set-volume "$sid" 1.0; then
-            echo "$(date '+%m%d %H:%M') pin $nm ($sid): '${cur:-?}' → 1.00" >> "$HEAL_LOG"
+        hw=$(hw_sink_id "$nm"); [ -n "$hw" ] || continue
+        hline=$(wpctl get-volume "$hw" 2>/dev/null)
+        hvol=$(echo "$hline" | sed -e 's/.*Volume: //' -e 's/ \[.*//')
+        case $hline in ''|*[!0-9.]*) hvol=1.0 ;; esac
+        hmute=false
+        case $hline in *MUTED*) hmute=true ;; esac
+        if ! awk "BEGIN{exit !($hvol == $dvol)}"; then
+            wpctl set-volume "$hw" "$dvol" 2>/dev/null \
+                && echo "$(date '+%m%d %H:%M') mirror $nm vol $hvol → $dvol" >> "$HEAL_LOG"
+        fi
+        if [ "$hmute" != "$dmute" ]; then
+            wpctl set-mute "$hw" "$( $dmute && echo 1 || echo 0 )" 2>/dev/null \
+                && echo "$(date '+%m%d %H:%M') mirror $nm mute $hmute → $dmute" >> "$HEAL_LOG"
         fi
     done
 }
@@ -121,7 +146,7 @@ while :; do
                 systemctl --user try-restart easyeffects.service 2>/dev/null
             fi
         fi
-        pin_hw_volume
+        mirror_default_state    # supersedes pin_hw_volume: owns both volume + mute
     fi
 
     sleep 3

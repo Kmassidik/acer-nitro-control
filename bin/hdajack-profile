@@ -63,43 +63,43 @@ hw_sink_id() {
         | grep " $1 \[" | cut -d. -f1 | tr -cd '0-9'
 }
 
-# Mirror state integration: the Plasma widget mutates EXACTLY ONE device
-# (the selected/default one). With the EQ chain there are two devices
-# (virtual EE sink + hardware), and a stream may sit pointed directly at
-# hardware — then widget mute says MUTED while the speaker keeps playing
-# (observed live). Mirror the default sink's volume AND mute onto the
-# hardware analog sinks every tick so any bypassing stream obeys the
-# widget too.
-mirror_default_state() {
-    # 1) the device the widget actually controls = the '*' default sink
-    local defaultsid line dvol=1.0 dmute=false nm hw hvol hmute
+# Mirror integration, CHANGE-DRIVEN (v2): the Plasma widget mutates exactly
+# ONE device (the '*' default = EasyEffects virtual sink). The earlier
+# every-3s stamp kept re-asserting that value and EVENTUALLY reverted
+# direct hardware volume within ~1s of the widget (reproduced: hardware
+# 0.95 → watcher → 0.40; 20 identical sets/minute in the heal log).
+# v2 rule: propagate default-sink volume/mute to hardware ONLY when the
+# DEFAULT sink's state actually changed since the previous tick. Hardware
+# nodes baseline). Also their node ids get recreated on profile switches,
+# which invalidates the baseline, so direct hardware manipulation works.
+sync_on_change() {
+    local defaultsid line dvol dmute nm hw hline hvol hmute
     defaultsid=$(wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' \
         | grep '\*' | cut -d. -f1 | tr -cd '0-9' | head -1)
     [ -n "$defaultsid" ] || return 0
+    # default node id changed (EE restart) → treated as change, sync follows
+    if [ "$defaultsid" != "$DEF_SID_LAST" ]; then
+        DEF_CHG=true
+    fi
     line=$(wpctl get-volume "$defaultsid" 2>/dev/null)
-    case $line in
-        *MUTED*) dmute=true ;;
-    esac
     dvol=$(echo "$line" | sed -e 's/.*Volume: //' -e 's/ \[.*//')
-    case $dvol in ''|*[!0-9.]*) dvol=1.0 ;; esac
-    # 2) mirror onto hardware analog sinks (0=unmute, 1=mute for wpctl)
-    for nm in Speaker Headphones; do
-        hw=$(hw_sink_id "$nm"); [ -n "$hw" ] || continue
-        hline=$(wpctl get-volume "$hw" 2>/dev/null)
-        hvol=$(echo "$hline" | sed -e 's/.*Volume: //' -e 's/ \[.*//')
-        case $hline in ''|*[!0-9.]*) hvol=1.0 ;; esac
-        hmute=false
-        case $hline in *MUTED*) hmute=true ;; esac
-        if ! awk "BEGIN{exit !($hvol == $dvol)}"; then
-            wpctl set-volume "$hw" "$dvol" 2>/dev/null \
-                && echo "$(date '+%m%d %H:%M') mirror $nm vol $hvol → $dvol" >> "$HEAL_LOG"
-        fi
-        if [ "$hmute" != "$dmute" ]; then
+    case $dvol in ''|*[!0-9.]*) return 0 ;; esac
+    dmute=false; case $line in *MUTED*) dmute=true ;; esac
+    if [ "$DEF_CHG" = true ] || [ "$dvol$dmute" != "$DEF_LAST" ]; then
+        for nm in Speaker Headphones; do
+            hw=$(hw_sink_id "$nm"); [ -n "$hw" ] || continue
+            wpctl set-volume "$hw" "$dvol" 2>/dev/null
             wpctl set-mute "$hw" "$( $dmute && echo 1 || echo 0 )" 2>/dev/null \
-                && echo "$(date '+%m%d %H:%M') mirror $nm mute $hmute → $dmute" >> "$HEAL_LOG"
-        fi
-    done
+                && echo "$(date '+%m%d %H:%M') mirror-on-change $nm vol=$dvol mute=$dmute (default $dvol$dmute)" >> "$HEAL_LOG"
+        done
+        DEF_SID_LAST=$defaultsid
+        DEF_LAST="$dvol$dmute"
+        DEF_CHG=false
+    fi
 }
+DEF_SID_LAST=""
+DEF_LAST=""
+DEF_CHG=false
 
 assert_profile() {  # set, let ports settle, re-assert (F2 race)
     local want=$1
@@ -146,7 +146,7 @@ while :; do
                 systemctl --user try-restart easyeffects.service 2>/dev/null
             fi
         fi
-        mirror_default_state    # supersedes pin_hw_volume: owns both volume + mute
+        sync_on_change    # v2: propagate ONLY on default-sink change (no stamping)
     fi
 
     sleep 3

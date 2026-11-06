@@ -5,7 +5,12 @@ Wants=pipewire.service
 
 [Service]
 Type=simple
-ExecStartPre=/usr/bin/sleep 3
+# Guarantee a single instance: any leftover easyeffects (e.g. elderly
+# instance surviving a restart like the 1106 21:08 double-fight observed:
+# two processes racing over the same easyeffects_sink -> audio on/off
+# flip-flop) is terminated before a new one starts.
+ExecStartPre=/bin/sh -c 'pkill -x easyeffects 2>/dev/null; sleep 1; true'
+ExecStartPre=/usr/bin/sleep 1
 ExecStart=/usr/bin/easyeffects --service-mode
 ExecStartPost=/bin/sh -c 'for i in 1 2 3 4 5; do timeout 8 /usr/bin/easyeffects -l Boosted 2>/dev/null && exit 0; sleep 1; done; exit 0'
 Restart=on-failure
